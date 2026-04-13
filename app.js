@@ -549,6 +549,10 @@ function getDPEColor(letter) {
 let currentType = "T";
 let searchHistory = JSON.parse(localStorage.getItem("akila_history") || "[]");
 let scanData = null;
+let leafletMap = null;
+let geoJsonLayer = null;
+let selectedRnbIds = new Set();
+let centerRnbId = null;
 
 function setStatus(mode, text) {
     const indicator = $("status-indicator");
@@ -557,7 +561,7 @@ function setStatus(mode, text) {
 }
 
 function showState(stateId) {
-    ["welcome-state", "loading-state", "error-state", "results-container"].forEach(id => {
+    ["welcome-state", "loading-state", "error-state", "map-container", "results-container"].forEach(id => {
         $(id).style.display = id === stateId ? "" : "none";
     });
 }
@@ -613,63 +617,222 @@ async function runScan() {
     if (!entree) { showToast("Please enter an ID or address.", "error"); return; }
 
     showState("loading-state");
-    setStatus("loading", "Scanning...");
+    setStatus("loading", "Scanning Area...");
     $("btn-search").disabled = true;
 
     try {
-        // Step 1: Resolve
         setStep(1);
         const res = await resoudreEntree(entree);
-        const batId = res.bat_id_bdnb;
-
-        if (!batId) {
+        // Wait, did we get coordinates?
+        if (!res.lat || !res.lon) {
             showState("error-state");
-            $("error-title").textContent = "Building not found";
-            $("error-message").textContent = "No building found in the BDNB database for this input. Please check the address or try with a BAN key.";
+            $("error-title").textContent = "Location not found";
+            $("error-message").textContent = "Could not resolve geographic coordinates for this input.";
             setStatus("error", "Error");
             $("btn-search").disabled = false;
             return;
         }
+        
+        await renderMapSelection(res);
+        addToHistory(entree, currentType);
+    } catch (e) {
+        showState("error-state");
+        $("error-title").textContent = "Error";
+        $("error-message").textContent = e.message;
+        setStatus("error", "Error");
+        $("btn-search").disabled = false;
+    }
+}
 
-        // Step 2: BDNB extraction
+async function renderMapSelection(res) {
+    showState("map-container");
+    setStatus("ready", "Select buildings");
+    $("btn-search").disabled = false;
+    
+    if (leafletMap) {
+        leafletMap.remove();
+        leafletMap = null;
+    }
+    
+    leafletMap = L.map('map').setView([res.lat, res.lon], 18);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap'
+    }).addTo(leafletMap);
+    
+    L.circleMarker([res.lat, res.lon], {radius: 8, color: "var(--akila-green)", fillColor: "var(--akila-green)", fillOpacity: 1}).addTo(leafletMap).bindPopup("Target").openPopup();
+    
+    const offset = 0.002;
+    const bbox = `${res.lon - offset},${res.lat - offset},${res.lon + offset},${res.lat + offset}`;
+    
+    selectedRnbIds.clear();
+    if (res.rnb_id) selectedRnbIds.add(res.rnb_id);
+    centerRnbId = res.rnb_id;
+    updateMapActions();
+    
+    try {
+        const buildingsData = await fetchJSON(`${API.RNB_BASE}/?bbox=${bbox}&with_plots=1`);
+        if (buildingsData && buildingsData.results) {
+            // RNB geojson format: each result has .shape GeoJSON Geometry. We must map it to a GeoJSON FeatureCollection
+            const features = buildingsData.results.filter(r => r.shape).map(r => ({
+                type: "Feature",
+                geometry: r.shape,
+                properties: { rnb_id: r.rnb_id, status: r.status }
+            }));
+            
+            geoJsonLayer = L.geoJSON({type: "FeatureCollection", features: features}, {
+                style: function(feature) {
+                    const isSelected = selectedRnbIds.has(feature.properties.rnb_id);
+                    return {
+                        fillColor: isSelected ? "var(--akila-blue)" : "#484F58",
+                        color: isSelected ? "#fff" : "#ccc",
+                        weight: 2,
+                        fillOpacity: isSelected ? 0.7 : 0.3
+                    };
+                },
+                onEachFeature: function(feature, layer) {
+                    layer.on('click', function() {
+                        const id = feature.properties.rnb_id;
+                        if (selectedRnbIds.has(id)) {
+                            selectedRnbIds.delete(id);
+                        } else {
+                            selectedRnbIds.add(id);
+                        }
+                        geoJsonLayer.setStyle(function(f) {
+                            const isSelected = selectedRnbIds.has(f.properties.rnb_id);
+                            return {
+                                fillColor: isSelected ? "var(--akila-blue)" : "#484F58",
+                                color: isSelected ? "#fff" : "#ccc",
+                                fillOpacity: isSelected ? 0.7 : 0.3
+                            };
+                        });
+                        updateMapActions();
+                    });
+                    layer.bindTooltip(`RNB: ${feature.properties.rnb_id}`);
+                }
+            }).addTo(leafletMap);
+        }
+    } catch(e) {
+        console.error("Map load error", e);
+    }
+}
+
+function updateMapActions() {
+    $("map-selection-info").textContent = `${selectedRnbIds.size} building(s) selected`;
+    $("btn-run-multi-scan").style.display = selectedRnbIds.size > 0 ? "block" : "none";
+}
+
+// Attach listener
+$("btn-run-multi-scan").addEventListener("click", runMultiScan);
+
+async function runMultiScan() {
+    if (selectedRnbIds.size === 0) return;
+    
+    showState("loading-state");
+    setStatus("loading", "Processing Multi-Scan...");
+    
+    try {
         setStep(2);
-        const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-        const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
+        
+        let mergedBdnb = {
+            s_geom_groupe: 0,
+            nb_log: 0,
+            surface_utile: 0,
+            surface_habitable_immeuble: 0,
+            conso_elec: 0,
+            conso_gaz: 0
+        };
+        
+        const allAdeme = [];
+        const rnbIds = Array.from(selectedRnbIds);
+        let firstRes = null;
+        let firstBatId = null;
+        
+        for (const rnbId of rnbIds) {
+            const res = await resoudreEntree(rnbId);
+            if (!firstRes) firstRes = res;
+            
+            const batId = res.bat_id_bdnb;
+            if (!batId) continue;
+            if (!firstBatId) firstBatId = batId;
+            
+            const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
+            const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
+
+            const [dBase, dFfo, dDpe, dElec, dGaz] = await Promise.all([
+                bdnbQuery("batiment_groupe", { ...p1, select: "s_geom_groupe" }),
+                bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "nb_log" }),
+                currentType === "T"
+                    ? bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "surface_utile" })
+                    : bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "surface_habitable_immeuble" }),
+                bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "conso_tot" }),
+                bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "conso_tot" })
+            ]);
+            
+            // Accumulate numeric data
+            if (dBase[0]?.s_geom_groupe) mergedBdnb.s_geom_groupe += Number(dBase[0].s_geom_groupe);
+            if (dFfo[0]?.nb_log) mergedBdnb.nb_log += Number(dFfo[0].nb_log);
+            if (currentType === "T" && dDpe[0]?.surface_utile) mergedBdnb.surface_utile += Number(dDpe[0].surface_utile);
+            if (currentType === "P" && dDpe[0]?.surface_habitable_immeuble) mergedBdnb.surface_habitable_immeuble += Number(dDpe[0].surface_habitable_immeuble);
+            if (dElec[0]?.conso_tot) mergedBdnb.conso_elec += Number(dElec[0].conso_tot);
+            if (dGaz[0]?.conso_tot) mergedBdnb.conso_gaz += Number(dGaz[0].conso_tot);
+            
+            // ADEME (Step 3 inside loop)
+            const ademe = await collecterADEME(rnbId, res.adresse_label, res.cle_ban, currentType, null);
+            if (ademe.resultats.length) allAdeme.push(...ademe.resultats);
+        }
+
+        if (!firstBatId) {
+            showState("error-state");
+            $("error-title").textContent = "BDNB Extraction Failed";
+            $("error-message").textContent = "None of the selected buildings were found in BDNB.";
+            setStatus("error", "Error");
+            return;
+        }
+
+        setStep(3);
+        
+        // Fetch remaining structural/ownership metadata using the FIRST building to represent the complex
+        const p1_first = { batiment_groupe_id: `eq.${firstBatId}`, limit: 1 };
+        const pm_first = { batiment_groupe_id: `eq.${firstBatId}`, order: "millesime.desc", limit: 4 };
 
         const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpe, dElec, dGaz] = await Promise.all([
-            bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,s_geom_groupe,code_iris" }),
-            bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open" }),
-            bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,nb_log,nb_niveau,usage_niveau_1_txt" }),
-            bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1" }),
-            bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire" }),
-            bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-            bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction" }),
+            bdnbQuery("batiment_groupe", { ...p1_first, select: "code_commune_insee,libelle_commune_insee,code_iris" }),
+            bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1_first, select: "usage_principal_bdnb_open" }),
+            bdnbQuery("batiment_groupe_ffo_bat", { ...p1_first, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau" }),
+            bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1_first, select: "hauteur_mean,altitude_sol_mean,l_usage_1" }),
+            bdnbQuery("batiment_groupe_proprietaire", { ...p1_first, select: "bat_prop_denomination_proprietaire" }),
+            bdnbQuery("batiment_groupe_risques", { ...p1_first, select: "alea_argile,alea_radon,alea_sismique" }),
+            bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1_first, select: "indicateur_distance_au_reseau,reseau_en_construction" }),
             currentType === "T"
-                ? bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile,shon" })
-                : bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-            bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,conso_tot,nb_pdl_tot" }),
-            bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,conso_tot,nb_pdl_tot" }),
+                ? bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1_first, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe" })
+                : bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1_first, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe" }),
+            bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm_first, select: "millesime,nb_pdl_tot" }),
+            bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm_first, select: "millesime,nb_pdl_tot" }),
         ]);
 
         const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
               topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
               reseau = first(dReseau), dpe = first(dDpe);
+              
+        // Inject merged data back into representative objects so UI renders them
+        base.s_geom_groupe = mergedBdnb.s_geom_groupe;
+        ffo.nb_log = mergedBdnb.nb_log;
+        
+        let fakeElec = first(dElec) || {millesime: "2022"};
+        fakeElec.conso_tot = mergedBdnb.conso_elec || null;
+        let fakeGaz = first(dGaz) || {millesime: "2022"};
+        fakeGaz.conso_tot = mergedBdnb.conso_gaz || null;
 
-        const numeroDPE = val(dpe.identifiant_dpe);
-
-        // Step 3: ADEME
-        setStep(3);
-        const ademe = await collecterADEME(
-            res.rnb_id, res.adresse_label, res.cle_ban, currentType,
-            numeroDPE !== "—" ? numeroDPE : null
-        );
+        if (currentType === "T") dpe.surface_utile = mergedBdnb.surface_utile;
+        else dpe.surface_habitable_immeuble = mergedBdnb.surface_habitable_immeuble;
+        const numeroDPE = val(dpe?.identifiant_dpe);
 
         // Store scan data for export
         scanData = {
-            adresse: res.adresse_label || "Address not resolved",
-            resolution: res,
-            bdnb: { base, usage, ffo, topo, dpe, risques: risque, reseau, elec: dElec, gaz: dGaz },
-            ademe: ademe.resultats,
+            adresse: firstRes.adresse_label || "Multiple Buildings Selected",
+            resolution: firstRes,
+            bdnb: { base, usage, ffo, topo, dpe, risques: risque, reseau, elec: fakeElec, gaz: fakeGaz },
+            ademe: allAdeme,
             genere_le: new Date().toISOString()
         };
 
@@ -677,7 +840,7 @@ async function runScan() {
         showState("results-container");
 
         // Banner
-        const adresseAffichee = res.adresse_label || "Address not resolved";
+        const adresseAffichee = firstRes.adresse_label || "Multiple Buildings Selected";
         $("result-address").textContent = adresseAffichee;
         $("badge-type").textContent = currentType === "T" ? "Commercial" : "Residential";
 

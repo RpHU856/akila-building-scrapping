@@ -634,6 +634,17 @@ body {
     line-height: 1.6;
 }
 
+/* Map State */
+.map-container {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    margin-bottom: 24px;
+    border: 1px solid var(--border-default);
+    background: var(--bg-card);
+    box-shadow: var(--shadow-sm);
+    animation: fadeIn var(--duration-normal) var(--ease-out);
+}
+
 /* Loading State */
 .loading-state {
     display: flex;

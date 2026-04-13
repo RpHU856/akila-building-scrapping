@@ -659,13 +659,39 @@ def main():
     choix = input("  Cible : [T]ertiaire (Entreprise) ou [P]articulier (Logement) ? [T/p] : ").strip().upper()
     type_cible = "P" if choix == "P" else "T"
 
-    entree = input("  Identifiant RNB, clé BAN ou adresse : ").strip()
-    if not entree:
+    entree_brute = input("  Identifiants RNB, clé BAN ou adresses (séparés par des virgules) : ").strip()
+    if not entree_brute:
         return
 
-    print(f"\n  [1/3] Verrouillage de la cible...")
-    res = resoudre_entree(entree)
-    bat_id = res.get("bat_id_bdnb")
+    entrees = [e.strip() for e in entree_brute.split(",") if e.strip()]
+    
+    print(f"\n  Lancement du Multi-Scan pour {len(entrees)} élément(s)...")
+
+    # Méta-données consolidées
+    total_surf = 0.0
+    total_conso_el = 0.0
+    total_conso_g = 0.0
+    total_log = 0.0
+    
+    all_ademe = []
+    first_res = None
+    first_bdnb = None
+    first_dpe = None
+    
+    for idx, entree in enumerate(entrees):
+        print(f"\n{SEP2}")
+        print(f"  [ SCAN {idx+1}/{len(entrees)} ] : {entree}")
+        print(f"{SEP2}")
+        print(f"  [1/3] Verrouillage de la cible...")
+        res = resoudre_entree(entree)
+        bat_id = res.get("bat_id_bdnb")
+    
+        if not bat_id:
+            print(f"  ✗ Bâtiment {entree} introuvable dans la base BDNB. Ignoré.")
+            continue
+            
+        if not first_res:
+             first_res = res
 
     if not bat_id:
         print("\n  ✗ Bâtiment introuvable dans la base BDNB.")
@@ -734,8 +760,9 @@ def main():
     print(f"  ID BDNB (CSTB)           : {v(bat_id)}")
     print(f"  Clé BAN (Interop)        : {v(res.get('cle_ban'))}")
     if res.get("rnb_id"):
-        print(f"  Fiche RNB                : https://rnb.beta.gouv.fr/batiment/{res['rnb_id']}")
-    print(f"  Fiche BDNB               : https://bdnb.io/batiment/{bat_id}")
+        coords_str = f"&coords={res.get('lat')},{res.get('lon')},18" if res.get('lat') else ""
+        print(f"  Fiche RNB                : https://rnb.beta.gouv.fr/map?selectedBuilding={res['rnb_id']}{coords_str}")
+    print(f"  Fiche BDNB               : https://open.bdnb.io/?batiment_groupe_id={bat_id}")
 
     print(f"\n  LOCALISATION & TERRAIN")
     print(f"  {'─'*40}")
@@ -880,36 +907,58 @@ def main():
     else:
         print("  Aucune donnée supplémentaire trouvée.")
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # PARTIE 4 : DPE COMPLET (XLS Observatoire ou API fallback)
-    # ─────────────────────────────────────────────────────────────────────────
-    dossier_script = os.path.dirname(os.path.abspath(__file__))
-    donnees_dpe_complet = telecharger_dossier_complet(numero_dpe, dossier_script)
+        surf = d_base.get("s_geom_groupe")
+        if surf: total_surf += float(surf)
+        
+        nb_log = d_ffo.get("nb_log")
+        if nb_log: total_log += float(nb_log)
+        
+        if d_elec and d_elec[0].get("conso_tot"): total_conso_el += float(d_elec[0]["conso_tot"])
+        if d_gaz and d_gaz[0].get("conso_tot"): total_conso_g += float(d_gaz[0]["conso_tot"])
+        
+        if donnees_ademe:
+            all_ademe.append(donnees_ademe)
+            
+        if not first_bdnb:
+            first_bdnb = {
+                "base": d_base, "usage": d_usage, "ffo": d_ffo, "topo": d_topo,
+                "dpe": d_dpe, "risques": d_risque, "reseau": d_reseau,
+                "elec": d_elec, "gaz": d_gaz
+            }
 
     # ─────────────────────────────────────────────────────────────────────────
-    # EXPORT JSON AUTOMATIQUE
+    # EXPORT JSON AUTOMATIQUE CONSOLIDÉ
     # ─────────────────────────────────────────────────────────────────────────
+    if not first_res:
+        return
+
+    # Injection des données aggregées
+    if first_bdnb["base"]: first_bdnb["base"]["s_geom_groupe"] = total_surf
+    if first_bdnb["ffo"]: first_bdnb["ffo"]["nb_log"] = total_log
+    if first_bdnb["elec"] and first_bdnb["elec"][0]: first_bdnb["elec"][0]["conso_tot"] = total_conso_el
+    if first_bdnb["gaz"] and first_bdnb["gaz"][0]: first_bdnb["gaz"][0]["conso_tot"] = total_conso_g
+
+    adresse_affichee = first_res.get("adresse_label") or "Multi-batiments"
     slug = slugifier(adresse_affichee)
     ts   = datetime.now().strftime("%Y%m%d_%H%M")
+    
+    dossier_script = os.path.dirname(os.path.abspath(__file__))
     nom_json = f"akila_{slug}_{ts}.json"
     chemin_json = os.path.join(dossier_script, nom_json)
 
     export_data = {
         "adresse": adresse_affichee,
-        "resolution": res,
-        "bdnb": {
-            "base": d_base, "usage": d_usage, "ffo": d_ffo, "topo": d_topo,
-            "dpe": d_dpe, "risques": d_risque, "reseau": d_reseau,
-            "elec": d_elec, "gaz": d_gaz
-        },
-        "ademe_open": donnees_ademe,
-        "dpe_complet": donnees_dpe_complet if isinstance(donnees_dpe_complet, dict) else {},
+        "nb_batiments": len(entrees),
+        "resolution_primaire": first_res,
+        "bdnb_consolidated": first_bdnb,
+        "ademe_open": all_ademe,
+        "dpe_complet": {}, # Simplifié pour multi-scan
         "genere_le": datetime.now().isoformat()
     }
     try:
         with open(chemin_json, "w", encoding="utf-8") as f:
             json.dump(export_data, f, ensure_ascii=False, indent=2, default=str)
-        print(f"\n  Export JSON → {chemin_json}")
+        print(f"\n  Export JSON Consolidé → {chemin_json}")
     except Exception as e:
         print(f"\n  Export JSON échoué : {e}")
 
