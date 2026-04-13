@@ -761,8 +761,7 @@ def main():
     print(f"  Clé BAN (Interop)        : {v(res.get('cle_ban'))}")
     if res.get("rnb_id"):
         coords_str = f"&coords={res.get('lat')},{res.get('lon')},18" if res.get('lat') else ""
-        print(f"  Fiche RNB                : https://rnb.beta.gouv.fr/map?selectedBuilding={res['rnb_id']}{coords_str}")
-    print(f"  Fiche BDNB               : https://open.bdnb.io/?batiment_groupe_id={bat_id}")
+        print(f"  Fiche RNB                : https://rnb.beta.gouv.fr/carte?q={res['rnb_id']}{coords_str}")
 
     print(f"\n  LOCALISATION & TERRAIN")
     print(f"  {'─'*40}")

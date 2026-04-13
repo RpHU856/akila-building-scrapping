@@ -201,7 +201,71 @@
                                     <span class="source-name">BAN</span>
                                     <span class="source-desc">National Address Database</span>
                                 </div>
+                                <div class="source-card">
+                                    <div class="source-img-wrap">
+                                        <!-- IGN Logo - inline SVG -->
+                                        <svg viewBox="0 0 80 80" class="source-img">
+                                            <rect width="80" height="80" rx="12" fill="#F5F5F5"/>
+                                            <!-- Topo curves -->
+                                            <path d="M10 60 Q 30 20 60 40 T 80 10" fill="none" stroke="#6b8e23" stroke-width="2"/>
+                                            <path d="M10 70 Q 40 40 50 60 T 80 30" fill="none" stroke="#556b2f" stroke-width="2"/>
+                                            <path d="M20 50 Q 50 10 70 30" fill="none" stroke="#8fbc8f" stroke-width="2"/>
+                                            <!-- 3D Cube / topology -->
+                                            <path d="M30 35 L40 30 L50 35 L50 45 L40 50 L30 45 Z" fill="#2e8b57" opacity="0.8"/>
+                                            <path d="M30 35 L40 40 L50 35" fill="none" stroke="#fff" stroke-width="1"/>
+                                            <path d="M40 40 L40 50" fill="none" stroke="#fff" stroke-width="1"/>
+                                            <text x="40" y="74" text-anchor="middle" fill="#2e8b57" font-size="8" font-weight="700" font-family="Inter,sans-serif">IGN</text>
+                                        </svg>
+                                    </div>
+                                    <span class="source-name">IGN & BDTOPO</span>
+                                    <span class="source-desc">Geometry & Morphology</span>
+                                </div>
+                                <div class="source-card">
+                                    <div class="source-img-wrap">
+                                        <!-- Cadastre Logo - inline SVG -->
+                                        <svg viewBox="0 0 80 80" class="source-img">
+                                            <rect width="80" height="80" rx="12" fill="#F5F5F5"/>
+                                            <path d="M10 10 L40 15 L35 45 L15 35 Z" fill="#DEB887" stroke="#8B4513" stroke-width="1.5"/>
+                                            <path d="M40 15 L70 10 L65 40 L35 45 Z" fill="#F4A460" stroke="#8B4513" stroke-width="1.5"/>
+                                            <path d="M15 35 L35 45 L30 70 L10 65 Z" fill="#D2B48C" stroke="#8B4513" stroke-width="1.5"/>
+                                            <path d="M35 45 L65 40 L70 70 L30 70 Z" fill="#BC8F8F" stroke="#8B4513" stroke-width="1.5"/>
+                                            <circle cx="35" cy="45" r="3" fill="#8B0000"/>
+                                            <text x="40" y="77" text-anchor="middle" fill="#8B4513" font-size="7" font-weight="700" font-family="Inter,sans-serif">CADASTRE</text>
+                                        </svg>
+                                    </div>
+                                    <span class="source-name">Fichiers Fonciers</span>
+                                    <span class="source-desc">Parcels & Housing Units</span>
+                                </div>
+                                <div class="source-card">
+                                    <div class="source-img-wrap">
+                                        <!-- Enedis Logo - inline SVG -->
+                                        <svg viewBox="0 0 80 80" class="source-img">
+                                            <rect width="80" height="80" rx="12" fill="#F5F5F5"/>
+                                            <!-- Enedis Blue/Green shape -->
+                                            <circle cx="40" cy="35" r="20" fill="none" stroke="#00B4E6" stroke-width="4"/>
+                                            <path d="M35 25 L30 40 L40 40 L35 55 L50 35 L40 35 Z" fill="#9ACA3C"/>
+                                            <text x="40" y="74" text-anchor="middle" fill="#00B4E6" font-size="8" font-weight="700" font-family="Inter,sans-serif">Enedis</text>
+                                        </svg>
+                                    </div>
+                                    <span class="source-name">Enedis</span>
+                                    <span class="source-desc">Historic Electricity Data</span>
+                                </div>
+                                <div class="source-card">
+                                    <div class="source-img-wrap">
+                                        <!-- GRDF Logo - inline SVG -->
+                                        <svg viewBox="0 0 80 80" class="source-img">
+                                            <rect width="80" height="80" rx="12" fill="#1A2F50"/>
+                                            <!-- GRDF Flame -->
+                                            <path d="M40 20 C40 20 25 35 25 45 C25 55 35 60 40 60 C45 60 55 55 55 45 C55 35 40 20 40 20 Z" fill="#00BEE0"/>
+                                            <path d="M40 30 C40 30 32 40 32 48 C32 52 38 55 40 55 C42 55 48 52 48 48 C48 40 40 30 40 30 Z" fill="#FFFFFF"/>
+                                            <text x="40" y="74" text-anchor="middle" fill="#FFFFFF" font-size="8" font-weight="700" font-family="Inter,sans-serif">GRDF</text>
+                                        </svg>
+                                    </div>
+                                    <span class="source-name">GRDF</span>
+                                    <span class="source-desc">Historic Gas Data</span>
+                                </div>
                             </div>
+
                         </div>
                     </div>
 
@@ -242,6 +306,9 @@
 
                     <!-- Results Container -->
                     <div id="results-container" class="results-container" style="display:none;">
+                        <!-- Tab System (Only visible for Multi-Scan) -->
+                        <div id="results-tabs" class="results-tabs" style="display: none; margin-bottom: 20px; border-bottom: 1px solid var(--border-default); overflow-x: auto; white-space: nowrap; padding-bottom: 5px;"></div>
+
                         <!-- Results Address Banner -->
                         <div class="result-banner" id="result-banner">
                             <div class="banner-content">
