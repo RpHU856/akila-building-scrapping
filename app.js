@@ -661,69 +661,86 @@ async function renderMapSelection(res) {
     
     L.circleMarker([res.lat, res.lon], {radius: 8, color: "var(--akila-green)", fillColor: "var(--akila-green)", fillOpacity: 1}).addTo(leafletMap).bindPopup("Target").openPopup();
     
-    const offset = 0.002;
-    const bbox = `${res.lon - offset},${res.lat - offset},${res.lon + offset},${res.lat + offset}`;
+    const offset = 0.004;
+    const initialBbox = `${res.lon - offset},${res.lat - offset},${res.lon + offset},${res.lat + offset}`;
     
     selectedRnbIds.clear();
     if (res.rnb_id) selectedRnbIds.add(res.rnb_id);
     centerRnbId = res.rnb_id;
     updateMapActions();
     
-    try {
-        let apiUrl = `${API.RNB_BASE}/?bbox=${bbox}&with_plots=1&limit=100`;
-        let allFeatures = [];
-        
-        while (apiUrl) {
-            const buildingsData = await fetchJSON(apiUrl);
-            if (!buildingsData || !buildingsData.results) break;
-            
-            const features = buildingsData.results.filter(r => r.shape).map(r => ({
-                type: "Feature",
-                geometry: r.shape,
-                properties: { rnb_id: r.rnb_id, status: r.status }
-            }));
-            
-            allFeatures.push(...features);
-            apiUrl = buildingsData.next || null;
-            if (allFeatures.length > 500) break; // Sanity limit for rendering
-        }
-        
-        if (allFeatures.length > 0) {
-            geoJsonLayer = L.geoJSON({type: "FeatureCollection", features: allFeatures}, {
-                style: function(feature) {
-                    const isSelected = selectedRnbIds.has(feature.properties.rnb_id);
+    let drawnRnbIds = new Set();
+    geoJsonLayer = L.geoJSON(null, {
+        style: function(feature) {
+            const isSelected = selectedRnbIds.has(feature.properties.rnb_id);
+            return {
+                fillColor: isSelected ? "var(--akila-blue)" : "#484F58",
+                color: isSelected ? "#fff" : "#ccc",
+                weight: 2,
+                fillOpacity: isSelected ? 0.7 : 0.3
+            };
+        },
+        onEachFeature: function(feature, layer) {
+            layer.on('click', function() {
+                const id = feature.properties.rnb_id;
+                if (selectedRnbIds.has(id)) {
+                    selectedRnbIds.delete(id);
+                } else {
+                    selectedRnbIds.add(id);
+                }
+                geoJsonLayer.setStyle(function(f) {
+                    const isSelected = selectedRnbIds.has(f.properties.rnb_id);
                     return {
                         fillColor: isSelected ? "var(--akila-blue)" : "#484F58",
                         color: isSelected ? "#fff" : "#ccc",
-                        weight: 2,
                         fillOpacity: isSelected ? 0.7 : 0.3
                     };
-                },
-                onEachFeature: function(feature, layer) {
-                    layer.on('click', function() {
-                        const id = feature.properties.rnb_id;
-                        if (selectedRnbIds.has(id)) {
-                            selectedRnbIds.delete(id);
-                        } else {
-                            selectedRnbIds.add(id);
-                        }
-                        geoJsonLayer.setStyle(function(f) {
-                            const isSelected = selectedRnbIds.has(f.properties.rnb_id);
-                            return {
-                                fillColor: isSelected ? "var(--akila-blue)" : "#484F58",
-                                color: isSelected ? "#fff" : "#ccc",
-                                fillOpacity: isSelected ? 0.7 : 0.3
-                            };
-                        });
-                        updateMapActions();
-                    });
-                    layer.bindTooltip(`RNB: ${feature.properties.rnb_id}`);
-                }
-            }).addTo(leafletMap);
+                });
+                updateMapActions();
+            });
+            layer.bindTooltip(`RNB: ${feature.properties.rnb_id}`);
         }
-    } catch(e) {
-        console.error("Map load error", e);
+    }).addTo(leafletMap);
+
+    async function loadBuildingsInBbox(bboxStr) {
+        try {
+            let apiUrl = `${API.RNB_BASE}/?bbox=${bboxStr}&with_plots=1&limit=50`;
+            while (apiUrl) {
+                const buildingsData = await fetchJSON(apiUrl);
+                if (!buildingsData || !buildingsData.results) break;
+                
+                const newFeatures = [];
+                for (const r of buildingsData.results) {
+                    if (r.shape && r.rnb_id && !drawnRnbIds.has(r.rnb_id)) {
+                        drawnRnbIds.add(r.rnb_id);
+                        newFeatures.push({
+                            type: "Feature",
+                            geometry: r.shape,
+                            properties: { rnb_id: r.rnb_id, status: r.status }
+                        });
+                    }
+                }
+                if (newFeatures.length > 0) {
+                    geoJsonLayer.addData(newFeatures);
+                }
+                apiUrl = buildingsData.next || null;
+            }
+        } catch(e) {
+            console.error("Map load error", e);
+        }
     }
+
+    // Initial load
+    await loadBuildingsInBbox(initialBbox);
+
+    // Dynamic loading on pan/zoom
+    leafletMap.on('moveend', () => {
+        if (leafletMap.getZoom() >= 16) {
+            const bounds = leafletMap.getBounds();
+            const bboxStr = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`;
+            loadBuildingsInBbox(bboxStr);
+        }
+    });
 }
 
 function updateMapActions() {
