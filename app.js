@@ -862,13 +862,13 @@ async function runMultiScan() {
         dpeBadge.className = `badge badge-dpe${etiquette !== "—" ? ` dpe-${etiquette.toUpperCase()}` : ""}`;
 
         // IDs
-        const rnbLink = res.rnb_id ? `https://rnb.beta.gouv.fr/batiment/${res.rnb_id}` : "—";
-        const bdnbLink = `https://bdnb.io/batiment/${batId}`;
+        const rnbLink = firstRes.rnb_id ? `https://rnb.beta.gouv.fr/batiment/${firstRes.rnb_id}` : "—";
+        const bdnbLink = `https://open.bdnb.io/?batiment_groupe_id=${firstBatId}`;
         clearAndAppendRows("data-ids", [
-            ["RNB ID (Building)", val(res.rnb_id)],
-            ["BDNB ID (CSTB)", val(batId)],
-            ["BAN Key (Interop)", val(res.cle_ban)],
-            ...(res.rnb_id ? [["RNB Record", rnbLink]] : []),
+            ["RNB ID (Building)", val(firstRes.rnb_id)],
+            ["BDNB ID (CSTB)", val(firstBatId)],
+            ["BAN Key (Interop)", val(firstRes.cle_ban)],
+            ...(firstRes.rnb_id ? [["RNB Record", rnbLink]] : []),
             ["BDNB Record", bdnbLink],
         ]);
 
@@ -876,7 +876,7 @@ async function runMultiScan() {
         clearAndAppendRows("data-location", [
             ["Municipality (INSEE)", `${val(base.code_commune_insee)} - ${val(base.libelle_commune_insee)}`],
             ["IRIS Code", val(base.code_iris)],
-            ["GPS Coordinates", `${val(res.lat)}, ${val(res.lon)}`],
+            ["GPS Coordinates", `${val(firstRes.lat)}, ${val(firstRes.lon)}`],
         ]);
 
         // Physical
@@ -1017,10 +1017,10 @@ async function runMultiScan() {
         // ADEME Direct
         const ademeSection = $("section-ademe");
         const ademeData = $("data-ademe");
-        if (ademe.resultats.length) {
+        if (allAdeme.length) {
             ademeSection.style.display = "";
             ademeData.innerHTML = "";
-            for (const d of ademe.resultats.slice(0, 3)) {
+            for (const d of allAdeme.slice(0, 3)) {
                 const addrParts = [d.numero_rue, d.type_voie, d.nom_rue, d.Adresse_Brute].filter(x => x && x !== "\\N" && x !== "None");
                 const addr = addrParts.join(" ");
                 const cp = champ(d, "code_postal", "Code_Postal_BAN");
