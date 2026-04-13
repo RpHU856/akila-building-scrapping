@@ -670,16 +670,26 @@ async function renderMapSelection(res) {
     updateMapActions();
     
     try {
-        const buildingsData = await fetchJSON(`${API.RNB_BASE}/?bbox=${bbox}&with_plots=1`);
-        if (buildingsData && buildingsData.results) {
-            // RNB geojson format: each result has .shape GeoJSON Geometry. We must map it to a GeoJSON FeatureCollection
+        let apiUrl = `${API.RNB_BASE}/?bbox=${bbox}&with_plots=1&limit=100`;
+        let allFeatures = [];
+        
+        while (apiUrl) {
+            const buildingsData = await fetchJSON(apiUrl);
+            if (!buildingsData || !buildingsData.results) break;
+            
             const features = buildingsData.results.filter(r => r.shape).map(r => ({
                 type: "Feature",
                 geometry: r.shape,
                 properties: { rnb_id: r.rnb_id, status: r.status }
             }));
             
-            geoJsonLayer = L.geoJSON({type: "FeatureCollection", features: features}, {
+            allFeatures.push(...features);
+            apiUrl = buildingsData.next || null;
+            if (allFeatures.length > 500) break; // Sanity limit for rendering
+        }
+        
+        if (allFeatures.length > 0) {
+            geoJsonLayer = L.geoJSON({type: "FeatureCollection", features: allFeatures}, {
                 style: function(feature) {
                     const isSelected = selectedRnbIds.has(feature.properties.rnb_id);
                     return {
