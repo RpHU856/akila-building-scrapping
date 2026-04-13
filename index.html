@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AKILA Prospect — Building Scanner</title>
+    <meta name="description" content="Hybrid building scanner for identification and energy performance analysis. Sources: RNB, BAN, BDNB, ADEME, DPE Observatory.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%231E2D4F'/%3E%3Ccircle cx='25' cy='55' r='8' fill='%2300D26A'/%3E%3Crect x='38' y='25' width='8' height='50' rx='4' fill='white'/%3E%3Crect x='50' y='20' width='8' height='60' rx='4' fill='white'/%3E%3Crect x='62' y='30' width='8' height='40' rx='4' fill='white'/%3E%3Ccircle cx='78' cy='45' r='6' fill='%234B7BF5'/%3E%3C/svg%3E">
+</head>
+<body>
+    <!-- ═══ HEADER ═══ -->
+    <header id="app-header">
+        <div class="header-left">
+            <div class="logo-group">
+                <svg class="logo-icon" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="120" height="120" rx="24" fill="#1E2D4F"/>
+                    <circle cx="28" cy="68" r="10" fill="#00D26A"/>
+                    <rect x="44" y="28" width="10" height="64" rx="5" fill="white"/>
+                    <rect x="58" y="20" width="10" height="80" rx="5" fill="white"/>
+                    <rect x="72" y="35" width="10" height="50" rx="5" fill="white"/>
+                    <circle cx="95" cy="52" r="8" fill="#4B7BF5"/>
+                </svg>
+                <div class="logo-text">
+                    <span class="logo-title">Akila</span>
+                    <span class="logo-subtitle">Prospect</span>
+                </div>
+            </div>
+        </div>
+        <nav class="header-nav">
+            <button id="btn-tab-scanner" class="nav-tab active" data-tab="scanner">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                Scanner
+            </button>
+            <button id="btn-tab-editor" class="nav-tab" data-tab="editor">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg>
+                Script Editor
+            </button>
+        </nav>
+        <div class="header-right">
+            <div class="status-indicator" id="status-indicator">
+                <span class="status-dot"></span>
+                <span class="status-text">Ready</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ═══ MAIN CONTENT ═══ -->
+    <main id="app-main">
+
+        <!-- ─── TAB: SCANNER ─── -->
+        <section id="tab-scanner" class="tab-content active">
+            <!-- Search Panel -->
+            <div class="scanner-layout">
+                <aside class="search-panel">
+                    <div class="panel-card search-card">
+                        <h2 class="card-title">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                            New Search
+                        </h2>
+
+                        <div class="form-group">
+                            <label for="type-cible">Target Type</label>
+                            <div class="toggle-group">
+                                <button id="btn-tertiaire" class="toggle-btn active" data-value="T">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 7v14M21 7v14M6 11h.01M6 15h.01M10 11h.01M10 15h.01M14 11h.01M14 15h.01M18 11h.01M18 15h.01M6 7V3h12v4"/></svg>
+                                    Commercial
+                                </button>
+                                <button id="btn-particulier" class="toggle-btn" data-value="P">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                                    Residential
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="input-entree">ID or Address</label>
+                            <div class="input-wrapper">
+                                <input type="text" id="input-entree" placeholder="RNB ID, BAN key or free address..." autocomplete="off">
+                                <div class="input-hint" id="input-hint">Type an RNB ID, BAN key or any address</div>
+                            </div>
+                        </div>
+
+                        <button id="btn-search" class="btn-primary">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg>
+                            Run Scan
+                        </button>
+
+                        <div class="input-examples">
+                            <p class="examples-title">Examples:</p>
+                            <button class="example-chip" data-example="PQRS-1234-WXYZ">RNB: PQRS-1234-WXYZ</button>
+                            <button class="example-chip" data-example="75056_0001_00001">BAN: 75056_0001_00001</button>
+                            <button class="example-chip" data-example="10 rue de Rivoli Paris">Free address</button>
+                        </div>
+                    </div>
+
+                    <!-- History -->
+                    <div class="panel-card history-card">
+                        <h2 class="card-title">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            History
+                        </h2>
+                        <div id="history-list" class="history-list">
+                            <p class="empty-state">No searches yet</p>
+                        </div>
+                    </div>
+                </aside>
+
+                <!-- Results Panel -->
+                <div class="results-panel" id="results-panel">
+                    <!-- Welcome State -->
+                    <div id="welcome-state" class="welcome-state">
+                        <div class="welcome-visual">
+                            <svg class="welcome-icon" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="10" y="30" width="100" height="80" rx="8" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                                <rect x="20" y="40" width="35" height="25" rx="4" fill="currentColor" opacity="0.1"/>
+                                <rect x="65" y="40" width="35" height="8" rx="2" fill="currentColor" opacity="0.15"/>
+                                <rect x="65" y="53" width="25" height="8" rx="2" fill="currentColor" opacity="0.1"/>
+                                <rect x="20" y="75" width="80" height="6" rx="2" fill="currentColor" opacity="0.08"/>
+                                <rect x="20" y="87" width="60" height="6" rx="2" fill="currentColor" opacity="0.06"/>
+                                <rect x="20" y="99" width="70" height="6" rx="2" fill="currentColor" opacity="0.04"/>
+                                <circle cx="90" cy="20" r="15" fill="none" stroke="currentColor" stroke-width="2" opacity="0.2"/>
+                                <line x1="101" y1="31" x2="110" y2="40" stroke="currentColor" stroke-width="2" opacity="0.2"/>
+                            </svg>
+                        </div>
+                        <h2>Hybrid Building Scanner</h2>
+                        <p>Identify and analyze any building in France.<br>Cross-referenced data from official open databases.</p>
+
+                        <!-- Data Sources Visual -->
+                        <div class="data-sources">
+                            <p class="data-sources-title">Data Sources</p>
+                            <div class="source-cards">
+                                <div class="source-card">
+                                    <div class="source-img-wrap">
+                                        <!-- BDNB Logo - inline SVG representation -->
+                                        <svg viewBox="0 0 80 80" class="source-img">
+                                            <rect width="80" height="80" rx="12" fill="#F5F5F5"/>
+                                            <rect x="8" y="18" width="18" height="44" rx="2" fill="#2A5C6B"/>
+                                            <rect x="28" y="12" width="18" height="50" rx="2" fill="#E8734A"/>
+                                            <rect x="48" y="22" width="18" height="40" rx="2" fill="#2A5C6B"/>
+                                            <text x="40" y="74" text-anchor="middle" fill="#2A5C6B" font-size="8" font-weight="700" font-family="Inter,sans-serif">BDNB</text>
+                                        </svg>
+                                    </div>
+                                    <span class="source-name">BDNB</span>
+                                    <span class="source-desc">National Building Database</span>
+                                </div>
+                                <div class="source-card">
+                                    <div class="source-img-wrap">
+                                        <!-- RNB Logo - inline SVG representation -->
+                                        <svg viewBox="0 0 80 80" class="source-img">
+                                            <rect width="80" height="80" rx="12" fill="#F5F5F5"/>
+                                            <circle cx="52" cy="22" r="12" fill="#E63946"/>
+                                            <path d="M20 55 L40 30 L60 55 Z" fill="none" stroke="#1D3557" stroke-width="3"/>
+                                            <path d="M28 55 L28 42 L52 42 L52 55" fill="none" stroke="#1D3557" stroke-width="2.5"/>
+                                            <rect x="36" y="46" width="8" height="9" fill="#1D3557"/>
+                                            <text x="40" y="74" text-anchor="middle" fill="#1D3557" font-size="8" font-weight="700" font-family="Inter,sans-serif">RNB</text>
+                                        </svg>
+                                    </div>
+                                    <span class="source-name">RNB</span>
+                                    <span class="source-desc">National Building Registry</span>
+                                </div>
+                                <div class="source-card">
+                                    <div class="source-img-wrap">
+                                        <!-- DPE Energy Label - inline SVG -->
+                                        <svg viewBox="0 0 80 80" class="source-img">
+                                            <rect width="80" height="80" rx="12" fill="#F5F5F5"/>
+                                            <rect x="10" y="10" width="28" height="7" rx="2" fill="#319834"/><text x="14" y="16.5" fill="white" font-size="5.5" font-weight="700" font-family="Inter,sans-serif">A</text>
+                                            <rect x="10" y="19" width="32" height="7" rx="2" fill="#33CC31"/><text x="14" y="25.5" fill="white" font-size="5.5" font-weight="700" font-family="Inter,sans-serif">B</text>
+                                            <rect x="10" y="28" width="36" height="7" rx="2" fill="#B3D43E"/><text x="14" y="34.5" fill="white" font-size="5.5" font-weight="700" font-family="Inter,sans-serif">C</text>
+                                            <rect x="10" y="37" width="40" height="7" rx="2" fill="#E6E600"/><text x="14" y="43.5" fill="white" font-size="5.5" font-weight="700" font-family="Inter,sans-serif">D</text>
+                                            <rect x="10" y="46" width="44" height="7" rx="2" fill="#FFCC00"/><text x="14" y="52.5" fill="white" font-size="5.5" font-weight="700" font-family="Inter,sans-serif">E</text>
+                                            <rect x="10" y="55" width="48" height="7" rx="2" fill="#FF9A00"/><text x="14" y="61.5" fill="white" font-size="5.5" font-weight="700" font-family="Inter,sans-serif">F</text>
+                                            <rect x="10" y="64" width="52" height="7" rx="2" fill="#FF0000"/><text x="14" y="70.5" fill="white" font-size="5.5" font-weight="700" font-family="Inter,sans-serif">G</text>
+                                            <!-- House -->
+                                            <path d="M58 38 L68 28 L78 38 L78 52 L58 52 Z" fill="#E8E8E8" stroke="#999" stroke-width="1"/>
+                                            <path d="M58 38 L68 28 L78 38" fill="#666" stroke="#666" stroke-width="1"/>
+                                            <rect x="64" y="43" width="8" height="9" fill="#999"/>
+                                        </svg>
+                                    </div>
+                                    <span class="source-name">ADEME / DPE</span>
+                                    <span class="source-desc">Energy Performance Diagnostics</span>
+                                </div>
+                                <div class="source-card">
+                                    <div class="source-img-wrap">
+                                        <!-- BAN Logo - inline SVG -->
+                                        <svg viewBox="0 0 80 80" class="source-img">
+                                            <rect width="80" height="80" rx="12" fill="#F5F5F5"/>
+                                            <circle cx="40" cy="30" r="14" fill="none" stroke="#000091" stroke-width="3"/>
+                                            <circle cx="40" cy="30" r="5" fill="#000091"/>
+                                            <path d="M40 44 L40 60" stroke="#000091" stroke-width="3"/>
+                                            <circle cx="40" cy="62" r="3" fill="#E63946"/>
+                                            <text x="40" y="77" text-anchor="middle" fill="#000091" font-size="7" font-weight="700" font-family="Inter,sans-serif">BAN</text>
+                                        </svg>
+                                    </div>
+                                    <span class="source-name">BAN</span>
+                                    <span class="source-desc">National Address Database</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div id="loading-state" class="loading-state" style="display:none;">
+                        <div class="loader-container">
+                            <div class="loader-ring"></div>
+                            <div class="loader-ring delay-1"></div>
+                            <div class="loader-ring delay-2"></div>
+                        </div>
+                        <div class="loading-steps">
+                            <div class="step" id="step-1"><span class="step-dot"></span>Locking on target...</div>
+                            <div class="step" id="step-2"><span class="step-dot"></span>Extracting BDNB data...</div>
+                            <div class="step" id="step-3"><span class="step-dot"></span>Verifying ADEME records...</div>
+                        </div>
+                    </div>
+
+                    <!-- Error State -->
+                    <div id="error-state" class="error-state" style="display:none;">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                        <h3 id="error-title">Error</h3>
+                        <p id="error-message"></p>
+                    </div>
+
+                    <!-- Results Container -->
+                    <div id="results-container" class="results-container" style="display:none;">
+                        <!-- Results Address Banner -->
+                        <div class="result-banner" id="result-banner">
+                            <div class="banner-content">
+                                <h2 id="result-address">—</h2>
+                                <div class="banner-badges">
+                                    <span class="badge badge-type" id="badge-type">Commercial</span>
+                                    <span class="badge badge-dpe" id="badge-dpe">—</span>
+                                </div>
+                            </div>
+                            <div class="banner-actions">
+                                <button class="btn-icon" id="btn-export-json" title="Export JSON">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                </button>
+                                <button class="btn-icon" id="btn-copy-results" title="Copy results">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Result Sections -->
+                        <div class="results-grid">
+                            <!-- IDs Section -->
+                            <div class="result-section" id="section-ids">
+                                <h3 class="section-title">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                                    Official Identifiers
+                                </h3>
+                                <div class="data-grid" id="data-ids"></div>
+                            </div>
+
+                            <!-- Location Section -->
+                            <div class="result-section" id="section-location">
+                                <h3 class="section-title">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                    Location & Terrain
+                                </h3>
+                                <div class="data-grid" id="data-location"></div>
+                            </div>
+
+                            <!-- Physical Characteristics -->
+                            <div class="result-section" id="section-physical">
+                                <h3 class="section-title">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                                    Physical Characteristics
+                                </h3>
+                                <div class="data-grid" id="data-physical"></div>
+                            </div>
+
+                            <!-- Usage & Property -->
+                            <div class="result-section" id="section-usage">
+                                <h3 class="section-title">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>
+                                    Usage & Ownership
+                                </h3>
+                                <div class="data-grid" id="data-usage"></div>
+                            </div>
+
+                            <!-- Energy Performance -->
+                            <div class="result-section section-highlight" id="section-energy">
+                                <h3 class="section-title">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg>
+                                    Energy Performance
+                                </h3>
+                                <div class="energy-labels" id="energy-labels"></div>
+                                <div class="data-grid" id="data-energy"></div>
+                            </div>
+
+                            <!-- Real Consumption -->
+                            <div class="result-section" id="section-consumption">
+                                <h3 class="section-title">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+                                    Actual Consumption (DLE — SDES)
+                                </h3>
+                                <div id="data-consumption"></div>
+                            </div>
+
+                            <!-- Risks -->
+                            <div class="result-section" id="section-risks">
+                                <h3 class="section-title">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12" y2="17"/></svg>
+                                    Building Risks
+                                </h3>
+                                <div class="data-grid" id="data-risks"></div>
+                            </div>
+
+                            <!-- ADEME DPE Direct -->
+                            <div class="result-section" id="section-ademe" style="display:none;">
+                                <h3 class="section-title">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                    ADEME DPE Direct Results
+                                </h3>
+                                <div id="data-ademe"></div>
+                            </div>
+
+                            <!-- Observatory Link -->
+                            <div class="result-section" id="section-observatory" style="display:none;">
+                                <h3 class="section-title">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                    ADEME Observatory
+                                </h3>
+                                <div id="data-observatory"></div>
+                            </div>
+
+                            <!-- Raw Data (X-Ray) -->
+                            <div class="result-section section-raw" id="section-raw">
+                                <h3 class="section-title section-title-collapsible" id="toggle-raw">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="8"/></svg>
+                                    X-Ray — Raw BDNB Data
+                                    <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                </h3>
+                                <div class="raw-data-container" id="data-raw" style="display:none;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─── TAB: EDITOR ─── -->
+        <section id="tab-editor" class="tab-content" style="display:none;">
+            <div class="editor-layout">
+                <div class="editor-toolbar">
+                    <div class="editor-info">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+                        <span>AKILA_prospect.py</span>
+                    </div>
+                    <div class="editor-actions">
+                        <button id="btn-reset-script" class="btn-secondary btn-sm">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+                            Reset
+                        </button>
+                        <button id="btn-save-script" class="btn-primary btn-sm">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                            Save
+                        </button>
+                        <button id="btn-download-script" class="btn-accent btn-sm">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Download .py
+                        </button>
+                    </div>
+                </div>
+                <div class="editor-container">
+                    <div class="line-numbers" id="line-numbers"></div>
+                    <textarea id="script-editor" spellcheck="false" wrap="off"></textarea>
+                </div>
+                <div class="editor-footer">
+                    <span id="editor-stats">Lines: 0 · Characters: 0</span>
+                    <span id="editor-saved" class="saved-indicator" style="display:none;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                        Saved
+                    </span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ═══ TOAST NOTIFICATION ═══ -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
