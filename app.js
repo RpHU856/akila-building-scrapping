@@ -727,8 +727,10 @@ async function renderMapSelection(res) {
 }
 
 function updateMapActions() {
-    $("map-selection-info").textContent = `${selectedRnbIds.size} building(s) selected`;
-    $("btn-run-multi-scan").style.display = selectedRnbIds.size > 0 ? "block" : "none";
+    const count = selectedRnbIds.size;
+    $("map-selection-info").textContent = `${count} building(s) selected`;
+    $("btn-run-multi-scan").style.display = count > 0 ? "block" : "none";
+    $("btn-run-multi-scan").textContent = count > 1 ? `Multi-Scan (${count})` : "Scan";
 }
 
 // Attach listener
