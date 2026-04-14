@@ -1128,6 +1128,70 @@ body {
     color: var(--text-muted);
 }
 
+/* ── REGULATORY ALERT CARDS ─────────────────────────────────────────── */
+.alert-card {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 14px 16px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 10px;
+    border-left: 4px solid;
+    animation: alertFadeIn 0.3s ease;
+}
+@keyframes alertFadeIn {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+.alert-card.urgent {
+    background: rgba(255, 59, 59, 0.08);
+    border-left-color: #FF3B3B;
+}
+.alert-card.warning {
+    background: rgba(255, 165, 0, 0.08);
+    border-left-color: #FFA500;
+}
+.alert-card.info {
+    background: rgba(75, 123, 245, 0.08);
+    border-left-color: var(--akila-blue);
+}
+.alert-card.compliant {
+    background: rgba(0, 210, 106, 0.07);
+    border-left-color: var(--akila-green);
+}
+.alert-icon {
+    font-size: 1.3rem;
+    line-height: 1;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+.alert-body { flex: 1; }
+.alert-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 3px;
+}
+.alert-card.urgent  .alert-title { color: #FF6B6B; }
+.alert-card.warning .alert-title { color: #FFB84D; }
+.alert-card.info    .alert-title { color: #7BA7F7; }
+.alert-card.compliant .alert-title { color: var(--akila-green); }
+.alert-desc {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+.alert-deadline {
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 5px;
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.05);
+}
+
 /* Observatory link */
 .observatory-link {
     display: flex;
