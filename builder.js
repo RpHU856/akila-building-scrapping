@@ -11,26 +11,33 @@ async function collecterGeoriques(lat, lon, codeInsee) {
     const geo = (url, p) => apiFetch(url, p);
     const base = "https://georisques.gouv.fr/api/v1";
     const [dArgile, dSismo, dAzi, dCavites, dIcpe, dCatnat, dRadon] = await Promise.all([
-        geo(`${base}/argiles`,                { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/zonage-sismique`,          { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/azi`,                      { latlon: `${lon},${lat}`, rayon: 200 }),
-        geo(`${base}/cavites`,                  { latlon: `${lon},${lat}`, rayon: 500 }),
-        geo(`${base}/installations-classees`,   { latlon: `${lon},${lat}`, rayon: 500 }),
-        codeInsee ? geo(`${base}/gaspar/catnat`,{ code_insee_commune: codeInsee, page: 1, page_size: 5 }) : Promise.resolve(null),
-        codeInsee ? geo(`${base}/radon`,        { code_insee: codeInsee }) : Promise.resolve(null),
+        geo(`${base}/argiles`,              { latlon: `${lon},${lat}`, rayon: 100 }),
+        geo(`${base}/zonage-sismique`,      { latlon: `${lon},${lat}`, rayon: 100 }),
+        geo(`${base}/azi`,                  { latlon: `${lon},${lat}`, rayon: 200 }),
+        geo(`${base}/cavites`,              { latlon: `${lon},${lat}`, rayon: 500 }),
+        geo(`${base}/installations-classees`,{ latlon: `${lon},${lat}`, rayon: 500 }),
+        codeInsee ? geo(`${base}/gaspar/catnat`, { code_insee_commune: codeInsee, page: 1, page_size: 5 }) : Promise.resolve(null),
+        codeInsee ? geo(`${base}/radon`,         { code_insee: codeInsee }) : Promise.resolve(null),
     ]);
     const r = {};
+    // Argile
     if (dArgile?.data?.[0]) { r.argile_alea = dArgile.data[0].lib_risque_jo || dArgile.data[0].code_alea || "—"; r.argile_code = dArgile.data[0].code_alea || "—"; }
-    if (dSismo?.data?.[0])  { r.sismique_zone = dSismo.data[0].zone || "—"; r.sismique_lib = dSismo.data[0].lib_zone || "—"; }
+    // Sismique
+    if (dSismo?.data?.[0])  { r.sismique_zone = dSismo.data[0].zone || dSismo.data[0].code_zone || "—"; r.sismique_lib = dSismo.data[0].lib_zone || "—"; }
+    // Radon
     if (dRadon?.data?.[0])  r.radon_classe = dRadon.data[0].classe_potentiel || "—";
-    r.inondation_nb = dAzi?.data?.length || 0;
-    r.inondation_detail = dAzi?.data?.slice(0,3).map(x => x.lib_type_alea || x.typeAlea || "").join(", ") || "Aucune zone";
-    r.cavites_nb = dCavites?.data?.length || 0;
+    // Inondation — matches Python key: inondation_nb_zones
+    r.inondation_nb_zones = dAzi?.data?.length || 0;
+    r.inondation_detail   = dAzi?.data?.slice(0,3).map(x => x.lib_type_alea || x.typeAlea || "").join(", ") || "Aucune zone";
+    // Cavités
+    r.cavites_nb    = dCavites?.data?.length || 0;
     r.cavites_types = [...new Set((dCavites?.data || []).slice(0,5).map(x => x.typeCavite || ""))].join(", ") || "—";
-    r.icpe_nb = dIcpe?.data?.length || 0;
-    r.icpe_noms = (dIcpe?.data || []).slice(0,3).map(x => x.raisonSociale || x.nomEtab || "").join(", ") || "—";
-    r.catnat_nb = dCatnat?.total || dCatnat?.data?.length || 0;
-    r.catnat_types = [...new Set((dCatnat?.data || []).slice(0,5).map(x => x.libDomCatNat || ""))].join(", ") || "—";
+    // ICPE — matches Python key: icpe_rayon_500m
+    r.icpe_rayon_500m = dIcpe?.data?.length || 0;
+    r.icpe_noms       = (dIcpe?.data || []).slice(0,3).map(x => x.raisonSociale || x.nomEtab || "").join(", ") || "—";
+    // CatNat
+    r.catnat_nb      = dCatnat?.total || dCatnat?.data?.length || 0;
+    r.catnat_types   = [...new Set((dCatnat?.data || []).slice(0,5).map(x => x.libDomCatNat || ""))].join(", ") || "—";
     r.catnat_derniere = dCatnat?.data?.[0]?.datFin || dCatnat?.data?.[0]?.dateDeb || "—";
     return r;
 }
@@ -39,26 +46,28 @@ async function collecterFCU(lat, lon) {
     if (!lat || !lon) return null;
     const d = await apiFetch("https://france-chaleur-urbaine.beta.gouv.fr/api/v1/eligibility", { lat, lon });
     if (!d) return null;
+    // Keys match Python: fcu_ prefix
     return {
-        eligible:   d.isEligible ?? d.eligible ?? false,
-        distance_m: d.distance ?? d.distanceToNetwork ?? "—",
-        nom:        d.networkName ?? d.nom ?? "—",
-        id:         d.networkId ?? d.identifiant_reseau ?? "—",
-        enr_pct:    d.tauxENRR ?? "—",
-        co2:        d.emissionCO2 ?? "—",
+        fcu_eligible:   d.isEligible ?? d.eligible ?? false,
+        fcu_distance_m: d.distance ?? d.distanceToNetwork ?? "—",
+        fcu_reseau_nom: d.networkName ?? d.nom ?? "—",
+        fcu_reseau_id:  d.networkId ?? d.identifiant_reseau ?? "—",
+        fcu_enr_pct:    d.tauxENRR ?? "—",
+        fcu_co2:        d.emissionCO2 ?? "—",
     };
 }
 
-async function collecterSIRENE(lat, lon, rayon = 0.2) {
+async function collecterSIRENE(lat, lon, rayon = 0.08) {
     if (!lat || !lon) return [];
     const d = await apiFetch("https://recherche-entreprises.api.gouv.fr/search", { lat, long: lon, radius: rayon, per_page: 10 });
     return (d?.results || []).slice(0, 10).map(e => ({
-        siret:    e.siret || "—",
-        nom:      e.nom_complet || e.nom_raison_sociale || "—",
-        naf_code: e.activite_principale || "—",
-        naf_lib:  e.libelle_activite_principale || "—",
-        effectif: e.tranche_effectif_salarie || "—",
-        statut:   e.etat_administratif || "—",
+        siret:       e.siret || "—",
+        nom:         e.nom_complet || e.nom_raison_sociale || "—",
+        naf_code:    e.activite_principale || "—",
+        naf_libelle: e.libelle_activite_principale || "—",
+        adresse:     e.adresse || "—",
+        effectif:    e.tranche_effectif_salarie || "—",
+        statut:      e.etat_administratif || "—",
     }));
 }
 
@@ -474,37 +483,36 @@ function renderResultsDOM(dataCtx, mode, resObj) {
     renderConsoSection("Electricity", dataCtx.elecs, "elec", "⚡");
     renderConsoSection("Gas", dataCtx.gazs, "gaz", "🔥");
 
-    // Risks (BDNB + Géorisques enrichi)
+    // Risks (BDNB + Géorisques enrichi) — keys aligned with Python
     const geo = dataCtx.geo || {};
     clearAndAppendRows("data-risks", [
-        ["Clay / RGA (BDNB)",       val(risque?.alea_argile)],
-        ["Clay Hazard (Géorisques)",val(geo.argile_alea)],
-        ["Radon (BDNB)",            val(risque?.alea_radon)],
-        ["Radon Class (Géorisques)",geo.radon_classe ? `Class ${geo.radon_classe}` : "—"],
-        ["Seismic Zone",            geo.sismique_zone ? `Zone ${geo.sismique_zone} — ${geo.sismique_lib}` : val(risque?.alea_sismique)],
-        ["Flood Zones (AZI)",       geo.inondation_nb !== undefined ? `${geo.inondation_nb} zone(s) — ${geo.inondation_detail}` : "—"],
-        ["Underground Cavities (500m)", geo.cavites_nb !== undefined ? `${geo.cavites_nb}${geo.cavites_nb > 0 ? ` — ${geo.cavites_types}` : ""}` : "—"],
-        ["Natural Disasters (CatNat)",  geo.catnat_nb !== undefined ? `${geo.catnat_nb} event(s) — ${geo.catnat_types || "—"}` : "—"],
-        ["ICPE Facilities (500m)",      geo.icpe_nb !== undefined ? `${geo.icpe_nb}${geo.icpe_nb > 0 ? ` — ${geo.icpe_noms}` : ""}` : "—"],
+        ["Clay / RGA (BDNB)",            val(risque?.alea_argile)],
+        ["Clay Hazard (Géorisques)",     val(geo.argile_alea)],
+        ["Radon (BDNB)",                 val(risque?.alea_radon)],
+        ["Radon Class (Géorisques)",     geo.radon_classe ? `Class ${geo.radon_classe}` : "—"],
+        ["Seismic Zone",                 geo.sismique_zone ? `Zone ${geo.sismique_zone} — ${geo.sismique_lib}` : val(risque?.alea_sismique)],
+        ["Flood Zones (AZI)",            geo.inondation_nb_zones !== undefined ? `${geo.inondation_nb_zones} zone(s) — ${geo.inondation_detail}` : "—"],
+        ["Underground Cavities (500m)",  geo.cavites_nb !== undefined ? `${geo.cavites_nb}${geo.cavites_nb > 0 ? ` — ${geo.cavites_types}` : ""}` : "—"],
+        ["Natural Disasters (CatNat)",   geo.catnat_nb !== undefined ? `${geo.catnat_nb} event(s) — ${geo.catnat_types || "—"}` : "—"],
+        ["ICPE Facilities (500m)",        geo.icpe_rayon_500m !== undefined ? `${geo.icpe_rayon_500m}${geo.icpe_rayon_500m > 0 ? ` — ${geo.icpe_noms}` : ""}` : "—"],
     ]);
 
-    // France Chaleur Urbaine (enrichi)
+    // France Chaleur Urbaine — keys aligned with Python (fcu_ prefix)
     const fcu = dataCtx.fcu;
-    const fcuSection = $("section-fcu"), fcuGrid = $("data-fcu");
+    const fcuSection = $("section-fcu");
     if (fcu) {
         fcuSection.style.display = "";
         clearAndAppendRows("data-fcu", [
-            ["Eligible for Connection", fcu.eligible ? "✓ YES" : "✗ No"],
-            ["Distance to Network",     `${fcu.distance_m} m`],
-            ["Network Name",            val(fcu.nom)],
-            ["Network ID",              val(fcu.id)],
-            ["Renewable Energy %",      fcu.enr_pct !== "—" ? `${fcu.enr_pct}%` : "—"],
-            ["CO₂ Emission",            fcu.co2 !== "—" ? `${fcu.co2} kg/MWh` : "—"],
+            ["Eligible for Connection", fcu.fcu_eligible ? "✓ YES" : "✗ No"],
+            ["Distance to Network",     `${fcu.fcu_distance_m} m`],
+            ["Network Name",            val(fcu.fcu_reseau_nom)],
+            ["Network ID",              val(fcu.fcu_reseau_id)],
+            ["Renewable Energy %",      fcu.fcu_enr_pct !== "—" ? `${fcu.fcu_enr_pct}%` : "—"],
+            ["CO₂ Emission",            fcu.fcu_co2 !== "—" ? `${fcu.fcu_co2} kg/MWh` : "—"],
             ...(reseau?.indicateur_distance_au_reseau ? [["BDNB Distance", val(reseau.indicateur_distance_au_reseau)]] : []),
             ...(reseau?.reseau_en_construction !== undefined ? [["Under Construction", val(reseau.reseau_en_construction)]] : []),
         ]);
     } else {
-        // Fallback: show BDNB network data only if any
         if (reseau?.indicateur_distance_au_reseau || reseau?.reseau_en_construction !== undefined) {
             fcuSection.style.display = "";
             clearAndAppendRows("data-fcu", [
@@ -550,7 +558,7 @@ function renderResultsDOM(dataCtx, mode, resObj) {
         sirene.forEach(e => {
             const card = document.createElement("div");
             card.className = "ademe-card";
-            card.innerHTML = `<div class="ademe-header"><span class="ademe-numdpe">${e.siret}</span><span class="ademe-addr">${e.nom}</span></div><div class="ademe-detail">NAF: ${e.naf_code} — ${e.naf_lib} · Staff: ${e.effectif} · Status: ${e.statut}</div>`;
+            card.innerHTML = `<div class="ademe-header"><span class="ademe-numdpe">${e.siret}</span><span class="ademe-addr">${e.nom}</span></div><div class="ademe-detail">NAF: ${e.naf_code} — ${e.naf_libelle || e.naf_lib || "—"} · Staff: ${e.effectif} · Status: ${e.statut}${e.adresse && e.adresse !== "—" ? "<br>" + e.adresse : ""}</div>`;
             sireneDiv.appendChild(card);
         });
     } else {
