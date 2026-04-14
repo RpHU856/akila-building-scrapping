@@ -38,10 +38,7 @@
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 Scanner
             </button>
-            <button id="btn-tab-editor" class="nav-tab" data-tab="editor">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg>
-                Script Editor
-            </button>
+
         </nav>
         <div class="header-right">
             <div class="status-indicator" id="status-indicator">
@@ -481,42 +478,7 @@
             </div>
         </section>
 
-        <!-- ─── TAB: EDITOR ─── -->
-        <section id="tab-editor" class="tab-content" style="display:none;">
-            <div class="editor-layout">
-                <div class="editor-toolbar">
-                    <div class="editor-info">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
-                        <span>AKILA_prospect.py</span>
-                    </div>
-                    <div class="editor-actions">
-                        <button id="btn-reset-script" class="btn-secondary btn-sm">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
-                            Reset
-                        </button>
-                        <button id="btn-save-script" class="btn-primary btn-sm">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                            Save
-                        </button>
-                        <button id="btn-download-script" class="btn-accent btn-sm">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                            Download .py
-                        </button>
-                    </div>
-                </div>
-                <div class="editor-container">
-                    <div class="line-numbers" id="line-numbers"></div>
-                    <textarea id="script-editor" spellcheck="false" wrap="off"></textarea>
-                </div>
-                <div class="editor-footer">
-                    <span id="editor-stats">Lines: 0 · Characters: 0</span>
-                    <span id="editor-saved" class="saved-indicator" style="display:none;">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                        Saved
-                    </span>
-                </div>
-            </div>
-        </section>
+
     </main>
 
     <!-- ═══ TOAST NOTIFICATION ═══ -->
