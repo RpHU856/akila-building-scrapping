@@ -62,12 +62,16 @@ async function collecterSIRENE(lat, lon, rayon = 0.2) {
     }));
 }
 
-async function collecterEducation(lat, lon, rayon = 300) {
+async function collecterEducation(lat, lon, rayon = 500) {
     if (!lat || !lon) return [];
+    // The dataset uses 'latitude'/'longitude' fields and 'position' geopoint
+    // within_distance returns 400 — use bounding box approach instead
+    const latDelta = rayon / 111000;  // ~1 deg lat = 111km
+    const lonDelta = rayon / (111000 * Math.cos(lat * Math.PI / 180));
     const d = await apiFetch("https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records", {
-        where: `within_distance(coordonnees_gps, geom'POINT(${lon} ${lat})', ${rayon}m)`,
-        limit: 5,
-        select: "identifiant_de_l_etablissement,nom_etablissement,type_etablissement,adresse_1,code_postal,nom_commune,telephone,statut_public_prive,nombre_d_eleves"
+        where: `latitude >= ${lat - latDelta} AND latitude <= ${lat + latDelta} AND longitude >= ${lon - lonDelta} AND longitude <= ${lon + lonDelta} AND etat = 'OUVERT'`,
+        limit: 10,
+        select: "identifiant_de_l_etablissement,nom_etablissement,type_etablissement,libelle_nature,adresse_1,code_postal,nom_commune,telephone,mail,statut_public_prive,latitude,longitude,siren_siret,apprentissage,hebergement,restauration"
     });
     return d?.results || [];
 }
@@ -562,7 +566,10 @@ function renderResultsDOM(dataCtx, mode, resObj) {
         edu.forEach(e => {
             const card = document.createElement("div");
             card.className = "ademe-card";
-            card.innerHTML = `<div class="ademe-header"><span class="ademe-numdpe">UAI: ${e.identifiant_de_l_etablissement || "—"}</span><span class="ademe-addr">${e.nom_etablissement || "—"} (${e.type_etablissement || "—"})</span></div><div class="ademe-detail">${e.adresse_1 || ""}, ${e.code_postal || ""} ${e.nom_commune || ""} · ${e.statut_public_prive || "—"} · ${e.nombre_d_eleves || "—"} students</div>`;
+            const siret = e.siren_siret ? `SIRET: ${e.siren_siret}` : "";
+            const contact = [e.telephone, e.mail].filter(x => x && x !== "None").join(" · ");
+            const extras = [e.hebergement ? "🛏 Boarding" : null, e.restauration ? "🍽 Canteen" : null, e.apprentissage ? "🔧 Apprenticeship" : null].filter(Boolean).join(" · ");
+            card.innerHTML = `<div class="ademe-header"><span class="ademe-numdpe">UAI: ${e.identifiant_de_l_etablissement || "—"}</span><span class="ademe-addr">${e.nom_etablissement || "—"} (${e.libelle_nature || e.type_etablissement || "—"})</span></div><div class="ademe-detail">${e.adresse_1 || ""}, ${e.code_postal || ""} ${e.nom_commune || ""} · ${e.statut_public_prive || "—"}${siret ? " · " + siret : ""}${contact ? "<br>" + contact : ""}${extras ? "<br>" + extras : ""}</div>`;
             eduDiv.appendChild(card);
         });
     } else {
