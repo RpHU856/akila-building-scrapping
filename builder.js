@@ -49,10 +49,10 @@ async function collecterFCU(lat, lon) {
     };
 }
 
-async function collecterSIRENE(lat, lon, rayon = 0.08) {
+async function collecterSIRENE(lat, lon, rayon = 0.2) {
     if (!lat || !lon) return [];
-    const d = await apiFetch("https://recherche-entreprises.api.gouv.fr/search", { lat, long: lon, radius: rayon, per_page: 5 });
-    return (d?.results || []).slice(0, 5).map(e => ({
+    const d = await apiFetch("https://recherche-entreprises.api.gouv.fr/search", { lat, long: lon, radius: rayon, per_page: 10 });
+    return (d?.results || []).slice(0, 10).map(e => ({
         siret:    e.siret || "—",
         nom:      e.nom_complet || e.nom_raison_sociale || "—",
         naf_code: e.activite_principale || "—",
@@ -78,14 +78,16 @@ async function collecterDVF(lat, lon, rayon = 150) {
     return (d?.features || []).slice(0, 5).map(f => f.properties || {});
 }
 
-async function collecterBenchmark(codeCommune, hint) {
+async function collecterBenchmark(codeCommune, libelleCommune, hint) {
     const r = {};
-    if (codeCommune) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-commune/lines", { q: codeCommune, size: 1 });
-        if (d?.results?.[0]) r.commune = d.results[0];
+    // Try by commune name first (more reliable), then by INSEE code
+    const queries = [libelleCommune, codeCommune].filter(Boolean);
+    for (const q of queries) {
+        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-commune/lines", { q, size: 3 });
+        if (d?.results?.length) { r.commune = d.results[0]; break; }
     }
     if (hint) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-activite/lines", { q: hint, size: 3 });
+        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-activite/lines", { q: hint, size: 5 });
         if (d?.results?.length) r.activite = d.results;
     }
     return r;
@@ -140,14 +142,15 @@ async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
     const codeInsee = res.code_commune_insee || base?.code_commune_insee;
 
     // Call all new APIs in parallel
+    const libelleCommune = base?.libelle_commune_insee;
     const [ademeRes, dGeo, dFcu, dSirene, dEdu, dDvf, dBench] = await Promise.all([
         collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe)),
         collecterGeoriques(lat, lon, codeInsee),
         collecterFCU(lat, lon),
         collecterSIRENE(lat, lon),
-        collecterEducation(lat, lon),
-        collecterDVF(lat, lon),
-        collecterBenchmark(codeInsee, null),
+        collecterEducation(lat, lon, 500),
+        collecterDVF(lat, lon, 300),
+        collecterBenchmark(codeInsee, libelleCommune, null),
     ]);
 
     return {
