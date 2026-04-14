@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>#map { width: 100%; height: 500px; }</style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        const API_RNB_BASE = "https://rnb-api.beta.gouv.fr/api/alpha/buildings";
+        const map = L.map('map').setView([47.33, 5.03], 18); // Coteaux du Suzon approx
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+        let drawnRnbIds = new Set();
+        let geoJsonLayer = L.geoJSON(null, {
+            style: { fillColor: "blue", color: "white", weight: 2, fillOpacity: 0.5 }
+        }).addTo(map);
+
+        async function fetchJSON(url) {
+            const r = await fetch(url);
+            return r.ok ? await r.json() : null;
+        }
+
+        async function loadBuildingsInBbox(bboxStr) {
+            console.log("Loading bbox", bboxStr);
+            try {
+                let apiUrl = `${API_RNB_BASE}/?bbox=${bboxStr}&with_plots=1&limit=50`;
+                while (apiUrl) {
+                    const buildingsData = await fetchJSON(apiUrl);
+                    if (!buildingsData || !buildingsData.results) break;
+                    
+                    const newFeatures = [];
+                    for (const r of buildingsData.results) {
+                        if (r.shape && r.rnb_id && !drawnRnbIds.has(r.rnb_id)) {
+                            drawnRnbIds.add(r.rnb_id);
+                            newFeatures.push({
+                                type: "Feature",
+                                geometry: r.shape,
+                                properties: { rnb_id: r.rnb_id }
+                            });
+                        }
+                    }
+                    if (newFeatures.length > 0) {
+                        geoJsonLayer.addData(newFeatures);
+                        console.log("Added", newFeatures.length, "features");
+                    }
+                    apiUrl = buildingsData.next || null;
+                }
+            } catch(e) {
+                console.error("error", e);
+            }
+        }
+
+        const b = map.getBounds();
+        loadBuildingsInBbox(`${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`);
+    </script>
+</body>
+</html>
