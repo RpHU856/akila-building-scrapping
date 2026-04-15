@@ -494,6 +494,129 @@ function champ(d, ...keys) {
     return "—";
 }
 
+
+// ── EXTERNAL APIs (v2.1) ────────────────────────────────────────────────
+async function collecterGeoriques(lat, lon, codeInsee) {
+    if (!lat || !lon) return {};
+    const geo = {};
+    const r = await fetchJSON(`https://georisques.gouv.fr/api/v1/gas/radon`, { lng: lon, lat: lat, rayon: 100 });
+    if (r && r.data && r.data.length) geo.radon_classe = r.data[0].classe_potentiel;
+    
+    if (codeInsee) {
+        const s = await fetchJSON(`https://georisques.gouv.fr/api/v1/zonage_sismique`, { code_insee: codeInsee });
+        if (s && s.data && s.data.length) {
+            geo.sismique_zone = s.data[0].zone_sismicite;
+            geo.sismique_lib = s.data[0].zone_sismicite_libelle;
+        }
+    }
+    
+    function parseGeo(url, propCount, propTypes) {
+        return fetchJSON(url, { lng: lon, lat: lat, rayon: 500 }).then(d => {
+            if (d && d.data) {
+                geo[propCount] = d.data.length;
+                if (propTypes) geo[propTypes] = Array.from(new Set(d.data.map(x => x.libelle || x.nom || x.activite_secondaire || '').filter(Boolean))).slice(0,3).join(', ');
+            }
+        }).catch(()=>{});
+    }
+    
+    await Promise.all([
+        parseGeo(`https://georisques.gouv.fr/api/v1/gas/inondation`, 'inondation_nb_zones', 'inondation_detail'),
+        parseGeo(`https://georisques.gouv.fr/api/v1/gas/cavites`, 'cavites_nb', 'cavites_types'),
+        parseGeo(`https://georisques.gouv.fr/api/v1/gas/catnat`, 'catnat_nb', 'catnat_types'),
+        parseGeo(`https://georisques.gouv.fr/api/v1/gas/installations_classees`, 'icpe_rayon_500m', 'icpe_noms')
+    ]);
+    return geo;
+}
+
+async function collecterFCU(lat, lon) {
+    if (!lat || !lon) return null;
+    const r = await fetchJSON(`https://france-chaleur-urbaine.beta.gouv.fr/api/network-distance`, { lat, lon });
+    if (r) {
+        return {
+            fcu_eligible: r.isEligible || r.eligible || false,
+            fcu_distance_m: r.distance || 0,
+            fcu_reseau_nom: r.networkName || '—',
+            fcu_reseau_id: r.networkId || '—',
+            fcu_enr_pct: r.tauxENRR || '—',
+            fcu_co2: r.emissionCO2 || '—'
+        };
+    }
+    return null;
+}
+
+async function collecterSIRENE(lat, lon) {
+    if (!lat || !lon) return [];
+    try {
+        const r = await fetchJSON(`https://recherche-entreprises.api.gouv.fr/near`, { lat, lon, radius: 0.08, per_page: 10 });
+        if (r && r.results) {
+            return r.results.map(e => ({
+                siret: e.siret || '—',
+                nom: e.nom_complet || e.nom_raison_sociale || '—',
+                naf_code: e.activite_principale || '—',
+                naf_libelle: e.libelle_activite_principale || '—',
+                effectif: e.tranche_effectif_salarie || '—',
+                statut: e.etat_administratif || '—'
+            }));
+        }
+    } catch(e) {}
+    return [];
+}
+
+async function collecterEducation(lat, lon, rayonM) {
+    if (!lat || !lon) return [];
+    try {
+        const url = `https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records?where=within_distance(coordonnees_gps, geom'POINT(${lon} ${lat})', ${rayonM}m)&limit=5`;
+        const r = await fetchJSON(url);
+        return r && r.results ? r.results : [];
+    } catch(e) { return []; }
+}
+
+async function collecterDVF(lat, lon, rayonM) {
+    return [];
+}
+
+async function collecterBenchmark(codeCommune, libelleCommune, activiteOption) {
+    const b = {};
+    if (codeCommune) {
+        const r = await fetchJSON(`https://data.ademe.fr/data-fair/api/v1/datasets/dpe-v2-tertiaire-2/lines`, { qs: `code_commune:"${codeCommune}"`, size: 1 });
+        if (r && r.results && r.results.length) b.commune = r.results[0];
+    }
+    return b;
+}
+
+async function collecterGPU(lat, lon) {
+    if (!lat || !lon) return {};
+    const geom = JSON.stringify({ type: 'Point', coordinates: [lon, lat] });
+    const res = {};
+    try {
+        const r1 = await fetchJSON(`https://apicarto.ign.fr/api/gpu/zone-urba`, { geom });
+        if (r1 && r1.features) {
+            res.plu_nb_zones = r1.features.length;
+            res.plu_types = Array.from(new Set(r1.features.map(f => f.properties.typezone))).join(', ') || '—';
+            res.plu_libelles = Array.from(new Set(r1.features.map(f => f.properties.libelle))).slice(0,3).join(', ') || '—';
+        }
+        const r2 = await fetchJSON(`https://apicarto.ign.fr/api/gpu/prescription-surf`, { geom });
+        if (r2 && r2.features) {
+            res.plu_prescriptions_nb = r2.features.length;
+            res.plu_prescriptions = Array.from(new Set(r2.features.map(f => f.properties.libelle || f.properties.typepsc))).slice(0,5).join(', ') || '—';
+        }
+        const r3 = await fetchJSON(`https://apicarto.ign.fr/api/gpu/assiette-sup-s`, { geom });
+        if (r3 && r3.features) {
+            res.sup_nb = r3.features.length;
+            res.sup_libelles = Array.from(new Set(r3.features.map(f => f.properties.libelle || f.properties.nomservit))).slice(0,5).join(', ') || '—';
+        }
+    } catch(e) {}
+    return res;
+}
+
+async function collecterDINUM(siret) {
+    return {
+        isStub: true,
+        desc: "API Entreprise access requires valid habilitation.",
+        link: "https://entreprise.api.gouv.fr/"
+    };
+}
+
 // ── DOM HELPERS ─────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
@@ -753,1218 +876,85 @@ function updateMapActions() {
 // Attach listener
 $("btn-run-multi-scan").addEventListener("click", runMultiScan);
 
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
+// [Removed: duplicate/broken fetchBuildingData — correct version is in builder.js]
 
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpe, dElec, dGaz] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction" }),
-        type === "T"
-            ? bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile" })
-            : bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-    ]);
+function computeAlerts(ctx) {
+    const alerts = [];
+    const { dpe, ffo, base, bType, elec, gaz, elecs, gazs, fcu } = ctx;
+    const surface = dpe?.surface_utile || dpe?.shon || base?.s_geom_groupe || 0;
+    const isT = bType === "T" || (ffo?.usage_niveau_1_txt || "").toLowerCase().includes("tertiaire");
 
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau), dpe = first(dDpe);
-
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}], gazs = dGaz?.length ? dGaz : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const ademe = await collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, type, val(dpe?.identifiant_dpe));
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs, ademe: ademe.resultats
-    };
-}
-
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
-
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpeT, dDpeP, dElec, dGaz] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction" }),
-        bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile" }),
-        bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-    ]);
-
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau);
-
-    // Dynamic resolution of the active DPE
-    let dpe = null, bType = type;
-    const hasT = dDpeT && dDpeT.length > 0;
-    const hasP = dDpeP && dDpeP.length > 0;
-
-    if (hasT && hasP) {
-        dpe = type === "T" ? dDpeT[0] : dDpeP[0]; // Respect requested type if both are available
-        bType = type;
-    } else if (hasT) {
-        dpe = dDpeT[0];
-        bType = "T";
-    } else if (hasP) {
-        dpe = dDpeP[0];
-        bType = "P";
-    }
-    
-    // Add bType into the returned object so that rendering isn't locked by the global setting
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}], gazs = dGaz?.length ? dGaz : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const ademe = await collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe));
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs, ademe: ademe.resultats, bType
-    };
-}
-
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
-
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpeT, dDpeP, dElec, dGaz] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction" }),
-        bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile" }),
-        bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-    ]);
-
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau);
-
-    // Dynamic resolution of the active DPE
-    let dpe = null, bType = type;
-    const hasT = dDpeT && dDpeT.length > 0;
-    const hasP = dDpeP && dDpeP.length > 0;
-
-    if (hasT && hasP) {
-        dpe = type === "T" ? dDpeT[0] : dDpeP[0]; // Respect requested type if both are available
-        bType = type;
-    } else if (hasT) {
-        dpe = dDpeT[0];
-        bType = "T";
-    } else if (hasP) {
-        dpe = dDpeP[0];
-        bType = "P";
-    }
-    
-    // Add bType into the returned object so that rendering isn't locked by the global setting
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}], gazs = dGaz?.length ? dGaz : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const ademe = await collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe));
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs, ademe: ademe.resultats, bType
-    };
-}
-
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
-
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpeT, dDpeP, dElec, dGaz] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction" }),
-        bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile" }),
-        bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-    ]);
-
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau);
-
-    // Dynamic resolution of the active DPE
-    let dpe = null, bType = type;
-    const hasT = dDpeT && dDpeT.length > 0;
-    const hasP = dDpeP && dDpeP.length > 0;
-
-    if (hasT && hasP) {
-        dpe = type === "T" ? dDpeT[0] : dDpeP[0]; // Respect requested type if both are available
-        bType = type;
-    } else if (hasT) {
-        dpe = dDpeT[0];
-        bType = "T";
-    } else if (hasP) {
-        dpe = dDpeP[0];
-        bType = "P";
-    }
-    
-    // Add bType into the returned object so that rendering isn't locked by the global setting
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}], gazs = dGaz?.length ? dGaz : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const ademe = await collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe));
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs, ademe: ademe.resultats, bType
-    };
-}
-
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
-
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpeT, dDpeP, dElec, dGaz] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction" }),
-        bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile" }),
-        bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-    ]);
-
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau);
-
-    // Dynamic resolution of the active DPE
-    let dpe = null, bType = type;
-    const hasT = dDpeT && dDpeT.length > 0;
-    const hasP = dDpeP && dDpeP.length > 0;
-
-    if (hasT && hasP) {
-        dpe = type === "T" ? dDpeT[0] : dDpeP[0]; // Respect requested type if both are available
-        bType = type;
-    } else if (hasT) {
-        dpe = dDpeT[0];
-        bType = "T";
-    } else if (hasP) {
-        dpe = dDpeP[0];
-        bType = "P";
-    }
-    
-    // Add bType into the returned object so that rendering isn't locked by the global setting
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}], gazs = dGaz?.length ? dGaz : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const ademe = await collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe));
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs, ademe: ademe.resultats, bType
-    };
-}
-
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
-
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpeT, dDpeP, dElec, dGaz] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction" }),
-        bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile" }),
-        bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-    ]);
-
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau);
-
-    // Dynamic resolution of the active DPE
-    let dpe = null, bType = type;
-    const hasT = dDpeT && dDpeT.length > 0;
-    const hasP = dDpeP && dDpeP.length > 0;
-
-    if (hasT && hasP) {
-        dpe = type === "T" ? dDpeT[0] : dDpeP[0]; // Respect requested type if both are available
-        bType = type;
-    } else if (hasT) {
-        dpe = dDpeT[0];
-        bType = "T";
-    } else if (hasP) {
-        dpe = dDpeP[0];
-        bType = "P";
-    }
-    
-    // Add bType into the returned object so that rendering isn't locked by the global setting
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}], gazs = dGaz?.length ? dGaz : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const ademe = await collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe));
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs, ademe: ademe.resultats, bType
-    };
-}
-
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
-
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpeT, dDpeP, dElec, dGaz] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction" }),
-        bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile" }),
-        bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-    ]);
-
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau);
-
-    // Dynamic resolution of the active DPE
-    let dpe = null, bType = type;
-    const hasT = dDpeT && dDpeT.length > 0;
-    const hasP = dDpeP && dDpeP.length > 0;
-
-    if (hasT && hasP) {
-        dpe = type === "T" ? dDpeT[0] : dDpeP[0]; // Respect requested type if both are available
-        bType = type;
-    } else if (hasT) {
-        dpe = dDpeT[0];
-        bType = "T";
-    } else if (hasP) {
-        dpe = dDpeP[0];
-        bType = "P";
-    }
-    
-    // Add bType into the returned object so that rendering isn't locked by the global setting
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}], gazs = dGaz?.length ? dGaz : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const ademe = await collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe));
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs, ademe: ademe.resultats, bType
-    };
-}
-
-async function apiFetch(url, params = {}) {
-    try {
-        const qs = new URLSearchParams(params).toString();
-        const r = await fetch(qs ? `${url}?${qs}` : url, { headers: { "Accept": "application/json" } });
-        return r.ok ? r.json() : null;
-    } catch { return null; }
-}
-
-async function collecterGeoriques(lat, lon, codeInsee) {
-    if (!lat || !lon) return {};
-    const geo = (url, p) => apiFetch(url, p);
-    const base = "https://georisques.gouv.fr/api/v1";
-    const [dArgile, dSismo, dAzi, dCavites, dIcpe, dCatnat, dRadon] = await Promise.all([
-        geo(`${base}/argiles`,                { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/zonage-sismique`,          { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/azi`,                      { latlon: `${lon},${lat}`, rayon: 200 }),
-        geo(`${base}/cavites`,                  { latlon: `${lon},${lat}`, rayon: 500 }),
-        geo(`${base}/installations-classees`,   { latlon: `${lon},${lat}`, rayon: 500 }),
-        codeInsee ? geo(`${base}/gaspar/catnat`,{ code_insee_commune: codeInsee, page: 1, page_size: 5 }) : Promise.resolve(null),
-        codeInsee ? geo(`${base}/radon`,        { code_insee: codeInsee }) : Promise.resolve(null),
-    ]);
-    const r = {};
-    if (dArgile?.data?.[0]) { r.argile_alea = dArgile.data[0].lib_risque_jo || dArgile.data[0].code_alea || "—"; r.argile_code = dArgile.data[0].code_alea || "—"; }
-    if (dSismo?.data?.[0])  { r.sismique_zone = dSismo.data[0].zone || "—"; r.sismique_lib = dSismo.data[0].lib_zone || "—"; }
-    if (dRadon?.data?.[0])  r.radon_classe = dRadon.data[0].classe_potentiel || "—";
-    r.inondation_nb = dAzi?.data?.length || 0;
-    r.inondation_detail = dAzi?.data?.slice(0,3).map(x => x.lib_type_alea || x.typeAlea || "").join(", ") || "Aucune zone";
-    r.cavites_nb = dCavites?.data?.length || 0;
-    r.cavites_types = [...new Set((dCavites?.data || []).slice(0,5).map(x => x.typeCavite || ""))].join(", ") || "—";
-    r.icpe_nb = dIcpe?.data?.length || 0;
-    r.icpe_noms = (dIcpe?.data || []).slice(0,3).map(x => x.raisonSociale || x.nomEtab || "").join(", ") || "—";
-    r.catnat_nb = dCatnat?.total || dCatnat?.data?.length || 0;
-    r.catnat_types = [...new Set((dCatnat?.data || []).slice(0,5).map(x => x.libDomCatNat || ""))].join(", ") || "—";
-    r.catnat_derniere = dCatnat?.data?.[0]?.datFin || dCatnat?.data?.[0]?.dateDeb || "—";
-    return r;
-}
-
-async function collecterFCU(lat, lon) {
-    if (!lat || !lon) return null;
-    const d = await apiFetch("https://france-chaleur-urbaine.beta.gouv.fr/api/v1/eligibility", { lat, lon });
-    if (!d) return null;
-    return {
-        eligible:   d.isEligible ?? d.eligible ?? false,
-        distance_m: d.distance ?? d.distanceToNetwork ?? "—",
-        nom:        d.networkName ?? d.nom ?? "—",
-        id:         d.networkId ?? d.identifiant_reseau ?? "—",
-        enr_pct:    d.tauxENRR ?? "—",
-        co2:        d.emissionCO2 ?? "—",
-    };
-}
-
-async function collecterSIRENE(lat, lon, rayon = 0.08) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://recherche-entreprises.api.gouv.fr/search", { lat, long: lon, radius: rayon, per_page: 5 });
-    return (d?.results || []).slice(0, 5).map(e => ({
-        siret:    e.siret || "—",
-        nom:      e.nom_complet || e.nom_raison_sociale || "—",
-        naf_code: e.activite_principale || "—",
-        naf_lib:  e.libelle_activite_principale || "—",
-        effectif: e.tranche_effectif_salarie || "—",
-        statut:   e.etat_administratif || "—",
-    }));
-}
-
-async function collecterEducation(lat, lon, rayon = 300) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records", {
-        where: `within_distance(coordonnees_gps, geom'POINT(${lon} ${lat})', ${rayon}m)`,
-        limit: 5,
-        select: "identifiant_de_l_etablissement,nom_etablissement,type_etablissement,adresse_1,code_postal,nom_commune,telephone,statut_public_prive,nombre_d_eleves"
-    });
-    return d?.results || [];
-}
-
-async function collecterDVF(lat, lon, rayon = 150) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://apicarto.ign.fr/api/dvf/mutation", { lon, lat, dist: rayon, limit: 5 });
-    return (d?.features || []).slice(0, 5).map(f => f.properties || {});
-}
-
-async function collecterBenchmark(codeCommune, hint) {
-    const r = {};
-    if (codeCommune) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-commune/lines", { q: codeCommune, size: 1 });
-        if (d?.results?.[0]) r.commune = d.results[0];
-    }
-    if (hint) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-activite/lines", { q: hint, size: 3 });
-        if (d?.results?.length) r.activite = d.results;
-    }
-    return r;
-}
-
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
-
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpeT, dDpeP, dElec, dGaz, dSitadel] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open,categorie_usage_propriete" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1,nb_etages" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire,bat_prop_type_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction,identifiant_reseau" }),
-        bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile,shon" }),
-        bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("sitadel", { ...p1, limit: 5, select: "date_autorisation,type_autorisation,libelle_destination_principale" }),
-    ]);
-
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau);
-
-    // Dynamic resolution of the active DPE
-    let dpe = null, bType = type;
-    const hasT = dDpeT && dDpeT.length > 0;
-    const hasP = dDpeP && dDpeP.length > 0;
-
-    if (hasT && hasP) {
-        dpe = type === "T" ? dDpeT[0] : dDpeP[0];
-        bType = type;
-    } else if (hasT) {
-        dpe = dDpeT[0]; bType = "T";
-    } else if (hasP) {
-        dpe = dDpeP[0]; bType = "P";
+    // -- 1. DECRET TERTIAIRE --------------------------------------------------
+    if (isT && surface >= 1000) {
+        const c = dpe?.conso_dpe_tertiaire_ep_m2;
+        alerts.push({
+            level: "urgent", icon: "\u2696\ufe0f", title: "D\u00e9cret Tertiaire \u2014 Assujetti",
+            desc: "Surface " + Math.round(surface) + " m\u00b2 \u2265 1\u202f000\u202fm\u00b2 tertiaire. Obligations Operat\u00ae : \u221240\u202f% en 2030 \u00b7 \u221250\u202f% en 2040 \u00b7 \u221260\u202f% en 2050." + (c ? " Conso actuelle\u00a0: " + Math.round(c) + " kWh\u202fEP/m\u00b2/an." : ""),
+            deadline: "Prochaine \u00e9ch\u00e9ance : 31/12/2030 (\u221240\u202f%)"
+        });
+    } else if (isT && surface >= 500) {
+        alerts.push({
+            level: "info", icon: "\u2139\ufe0f", title: "D\u00e9cret Tertiaire \u2014 Seuil Non Atteint",
+            desc: "Surface " + Math.round(surface) + " m\u00b2 (< 1\u202f000\u202fm\u00b2). Non assujetti actuellement. Toute extension future peut d\u00e9clencher l\u2019obligation.",
+            deadline: null
+        });
     }
 
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}];
-    const gazs  = dGaz?.length  ? dGaz  : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const lat = res.lat, lon = res.lon;
-    const codeInsee = res.code_commune_insee || base?.code_commune_insee;
-
-    // Call all new APIs in parallel
-    const [ademeRes, dGeo, dFcu, dSirene, dEdu, dDvf, dBench] = await Promise.all([
-        collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe)),
-        collecterGeoriques(lat, lon, codeInsee),
-        collecterFCU(lat, lon),
-        collecterSIRENE(lat, lon),
-        collecterEducation(lat, lon),
-        collecterDVF(lat, lon),
-        collecterBenchmark(codeInsee, null),
-    ]);
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs,
-        ademe: ademeRes.resultats, bType,
-        sitadel: dSitadel || [],
-        geo: dGeo || {},
-        fcu: dFcu || null,
-        sirene: dSirene || [],
-        education: dEdu || [],
-        dvf: dDvf || [],
-        benchmark: dBench || {},
-    };
-}
-
-async function apiFetch(url, params = {}) {
-    try {
-        const qs = new URLSearchParams(params).toString();
-        const r = await fetch(qs ? `${url}?${qs}` : url, { headers: { "Accept": "application/json" } });
-        return r.ok ? r.json() : null;
-    } catch { return null; }
-}
-
-async function collecterGeoriques(lat, lon, codeInsee) {
-    if (!lat || !lon) return {};
-    const geo = (url, p) => apiFetch(url, p);
-    const base = "https://georisques.gouv.fr/api/v1";
-    const [dArgile, dSismo, dAzi, dCavites, dIcpe, dCatnat, dRadon] = await Promise.all([
-        geo(`${base}/argiles`,                { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/zonage-sismique`,          { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/azi`,                      { latlon: `${lon},${lat}`, rayon: 200 }),
-        geo(`${base}/cavites`,                  { latlon: `${lon},${lat}`, rayon: 500 }),
-        geo(`${base}/installations-classees`,   { latlon: `${lon},${lat}`, rayon: 500 }),
-        codeInsee ? geo(`${base}/gaspar/catnat`,{ code_insee_commune: codeInsee, page: 1, page_size: 5 }) : Promise.resolve(null),
-        codeInsee ? geo(`${base}/radon`,        { code_insee: codeInsee }) : Promise.resolve(null),
-    ]);
-    const r = {};
-    if (dArgile?.data?.[0]) { r.argile_alea = dArgile.data[0].lib_risque_jo || dArgile.data[0].code_alea || "—"; r.argile_code = dArgile.data[0].code_alea || "—"; }
-    if (dSismo?.data?.[0])  { r.sismique_zone = dSismo.data[0].zone || "—"; r.sismique_lib = dSismo.data[0].lib_zone || "—"; }
-    if (dRadon?.data?.[0])  r.radon_classe = dRadon.data[0].classe_potentiel || "—";
-    r.inondation_nb = dAzi?.data?.length || 0;
-    r.inondation_detail = dAzi?.data?.slice(0,3).map(x => x.lib_type_alea || x.typeAlea || "").join(", ") || "Aucune zone";
-    r.cavites_nb = dCavites?.data?.length || 0;
-    r.cavites_types = [...new Set((dCavites?.data || []).slice(0,5).map(x => x.typeCavite || ""))].join(", ") || "—";
-    r.icpe_nb = dIcpe?.data?.length || 0;
-    r.icpe_noms = (dIcpe?.data || []).slice(0,3).map(x => x.raisonSociale || x.nomEtab || "").join(", ") || "—";
-    r.catnat_nb = dCatnat?.total || dCatnat?.data?.length || 0;
-    r.catnat_types = [...new Set((dCatnat?.data || []).slice(0,5).map(x => x.libDomCatNat || ""))].join(", ") || "—";
-    r.catnat_derniere = dCatnat?.data?.[0]?.datFin || dCatnat?.data?.[0]?.dateDeb || "—";
-    return r;
-}
-
-async function collecterFCU(lat, lon) {
-    if (!lat || !lon) return null;
-    const d = await apiFetch("https://france-chaleur-urbaine.beta.gouv.fr/api/v1/eligibility", { lat, lon });
-    if (!d) return null;
-    return {
-        eligible:   d.isEligible ?? d.eligible ?? false,
-        distance_m: d.distance ?? d.distanceToNetwork ?? "—",
-        nom:        d.networkName ?? d.nom ?? "—",
-        id:         d.networkId ?? d.identifiant_reseau ?? "—",
-        enr_pct:    d.tauxENRR ?? "—",
-        co2:        d.emissionCO2 ?? "—",
-    };
-}
-
-async function collecterSIRENE(lat, lon, rayon = 0.2) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://recherche-entreprises.api.gouv.fr/search", { lat, long: lon, radius: rayon, per_page: 10 });
-    return (d?.results || []).slice(0, 10).map(e => ({
-        siret:    e.siret || "—",
-        nom:      e.nom_complet || e.nom_raison_sociale || "—",
-        naf_code: e.activite_principale || "—",
-        naf_lib:  e.libelle_activite_principale || "—",
-        effectif: e.tranche_effectif_salarie || "—",
-        statut:   e.etat_administratif || "—",
-    }));
-}
-
-async function collecterEducation(lat, lon, rayon = 300) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records", {
-        where: `within_distance(coordonnees_gps, geom'POINT(${lon} ${lat})', ${rayon}m)`,
-        limit: 5,
-        select: "identifiant_de_l_etablissement,nom_etablissement,type_etablissement,adresse_1,code_postal,nom_commune,telephone,statut_public_prive,nombre_d_eleves"
-    });
-    return d?.results || [];
-}
-
-async function collecterDVF(lat, lon, rayon = 150) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://apicarto.ign.fr/api/dvf/mutation", { lon, lat, dist: rayon, limit: 5 });
-    return (d?.features || []).slice(0, 5).map(f => f.properties || {});
-}
-
-async function collecterBenchmark(codeCommune, libelleCommune, hint) {
-    const r = {};
-    // Try by commune name first (more reliable), then by INSEE code
-    const queries = [libelleCommune, codeCommune].filter(Boolean);
-    for (const q of queries) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-commune/lines", { q, size: 3 });
-        if (d?.results?.length) { r.commune = d.results[0]; break; }
-    }
-    if (hint) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-activite/lines", { q: hint, size: 5 });
-        if (d?.results?.length) r.activite = d.results;
-    }
-    return r;
-}
-
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
-
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpeT, dDpeP, dElec, dGaz, dSitadel] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open,categorie_usage_propriete" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1,nb_etages" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire,bat_prop_type_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction,identifiant_reseau" }),
-        bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile,shon" }),
-        bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("sitadel", { ...p1, limit: 5, select: "date_autorisation,type_autorisation,libelle_destination_principale" }),
-    ]);
-
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau);
-
-    // Dynamic resolution of the active DPE
-    let dpe = null, bType = type;
-    const hasT = dDpeT && dDpeT.length > 0;
-    const hasP = dDpeP && dDpeP.length > 0;
-
-    if (hasT && hasP) {
-        dpe = type === "T" ? dDpeT[0] : dDpeP[0];
-        bType = type;
-    } else if (hasT) {
-        dpe = dDpeT[0]; bType = "T";
-    } else if (hasP) {
-        dpe = dDpeP[0]; bType = "P";
+    // -- 2. LOI CLIMAT DPE F/G -----------------------------------------------
+    const cls = (dpe?.classe_conso_energie_dpe_tertiaire || dpe?.classe_bilan_dpe || "").trim().toUpperCase();
+    if (cls === "G") {
+        alerts.push({ level: "urgent", icon: "\uD83D\uDEA8", title: "Loi Climat \u2014 DPE G\u00a0: Location Interdite",
+            desc: "DPE\u202fG interdit \u00e0 la location depuis le 1er janvier 2025 (Loi Climat & R\u00e9silience). Mise en conformit\u00e9 obligatoire avant toute nouvelle location.",
+            deadline: "Interdit depuis : Jan 2025" });
+    } else if (cls === "F") {
+        alerts.push({ level: "warning", icon: "\u26a0\ufe0f", title: "Loi Climat \u2014 DPE F\u00a0: Interdiction 2028",
+            desc: "Les logements class\u00e9s F seront interdits \u00e0 la location d\u00e8s janvier 2028. Anticipez les travaux pour maintenir la valeur locative.",
+            deadline: "Interdiction : Jan 2028 (\u223c3 ans)" });
+    } else if (cls === "E") {
+        alerts.push({ level: "info", icon: "\uD83D\uDCCB", title: "Loi Climat \u2014 DPE E\u00a0: \u00c9ch\u00e9ance 2034",
+            desc: "Les logements class\u00e9s E seront interdits \u00e0 la location en 2034. \u00c9chelonnez les r\u00e9novations d\u00e8s maintenant.",
+            deadline: "Interdiction pr\u00e9vue : Jan 2034" });
+    } else if (["A", "B", "C", "D"].includes(cls)) {
+        alerts.push({ level: "compliant", icon: "\u2705", title: "Loi Climat \u2014 DPE " + cls + "\u00a0: Conforme",
+            desc: "Classe " + cls + " \u2014 aucune restriction de location. Conforme \u00e0 la Loi Climat & R\u00e9silience.",
+            deadline: null });
     }
 
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}];
-    const gazs  = dGaz?.length  ? dGaz  : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const lat = res.lat, lon = res.lon;
-    const codeInsee = res.code_commune_insee || base?.code_commune_insee;
-
-    // Call all new APIs in parallel
-    const libelleCommune = base?.libelle_commune_insee;
-    const [ademeRes, dGeo, dFcu, dSirene, dEdu, dDvf, dBench] = await Promise.all([
-        collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe)),
-        collecterGeoriques(lat, lon, codeInsee),
-        collecterFCU(lat, lon),
-        collecterSIRENE(lat, lon),
-        collecterEducation(lat, lon, 500),
-        collecterDVF(lat, lon, 300),
-        collecterBenchmark(codeInsee, libelleCommune, null),
-    ]);
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs,
-        ademe: ademeRes.resultats, bType,
-        sitadel: dSitadel || [],
-        geo: dGeo || {},
-        fcu: dFcu || null,
-        sirene: dSirene || [],
-        education: dEdu || [],
-        dvf: dDvf || [],
-        benchmark: dBench || {},
-    };
-}
-
-async function apiFetch(url, params = {}) {
-    try {
-        const qs = new URLSearchParams(params).toString();
-        const r = await fetch(qs ? `${url}?${qs}` : url, { headers: { "Accept": "application/json" } });
-        return r.ok ? r.json() : null;
-    } catch { return null; }
-}
-
-async function collecterGeoriques(lat, lon, codeInsee) {
-    if (!lat || !lon) return {};
-    const geo = (url, p) => apiFetch(url, p);
-    const base = "https://georisques.gouv.fr/api/v1";
-    const [dArgile, dSismo, dAzi, dCavites, dIcpe, dCatnat, dRadon] = await Promise.all([
-        geo(`${base}/argiles`,                { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/zonage-sismique`,          { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/azi`,                      { latlon: `${lon},${lat}`, rayon: 200 }),
-        geo(`${base}/cavites`,                  { latlon: `${lon},${lat}`, rayon: 500 }),
-        geo(`${base}/installations-classees`,   { latlon: `${lon},${lat}`, rayon: 500 }),
-        codeInsee ? geo(`${base}/gaspar/catnat`,{ code_insee_commune: codeInsee, page: 1, page_size: 5 }) : Promise.resolve(null),
-        codeInsee ? geo(`${base}/radon`,        { code_insee: codeInsee }) : Promise.resolve(null),
-    ]);
-    const r = {};
-    if (dArgile?.data?.[0]) { r.argile_alea = dArgile.data[0].lib_risque_jo || dArgile.data[0].code_alea || "—"; r.argile_code = dArgile.data[0].code_alea || "—"; }
-    if (dSismo?.data?.[0])  { r.sismique_zone = dSismo.data[0].zone || "—"; r.sismique_lib = dSismo.data[0].lib_zone || "—"; }
-    if (dRadon?.data?.[0])  r.radon_classe = dRadon.data[0].classe_potentiel || "—";
-    r.inondation_nb = dAzi?.data?.length || 0;
-    r.inondation_detail = dAzi?.data?.slice(0,3).map(x => x.lib_type_alea || x.typeAlea || "").join(", ") || "Aucune zone";
-    r.cavites_nb = dCavites?.data?.length || 0;
-    r.cavites_types = [...new Set((dCavites?.data || []).slice(0,5).map(x => x.typeCavite || ""))].join(", ") || "—";
-    r.icpe_nb = dIcpe?.data?.length || 0;
-    r.icpe_noms = (dIcpe?.data || []).slice(0,3).map(x => x.raisonSociale || x.nomEtab || "").join(", ") || "—";
-    r.catnat_nb = dCatnat?.total || dCatnat?.data?.length || 0;
-    r.catnat_types = [...new Set((dCatnat?.data || []).slice(0,5).map(x => x.libDomCatNat || ""))].join(", ") || "—";
-    r.catnat_derniere = dCatnat?.data?.[0]?.datFin || dCatnat?.data?.[0]?.dateDeb || "—";
-    return r;
-}
-
-async function collecterFCU(lat, lon) {
-    if (!lat || !lon) return null;
-    const d = await apiFetch("https://france-chaleur-urbaine.beta.gouv.fr/api/v1/eligibility", { lat, lon });
-    if (!d) return null;
-    return {
-        eligible:   d.isEligible ?? d.eligible ?? false,
-        distance_m: d.distance ?? d.distanceToNetwork ?? "—",
-        nom:        d.networkName ?? d.nom ?? "—",
-        id:         d.networkId ?? d.identifiant_reseau ?? "—",
-        enr_pct:    d.tauxENRR ?? "—",
-        co2:        d.emissionCO2 ?? "—",
-    };
-}
-
-async function collecterSIRENE(lat, lon, rayon = 0.2) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://recherche-entreprises.api.gouv.fr/search", { lat, long: lon, radius: rayon, per_page: 10 });
-    return (d?.results || []).slice(0, 10).map(e => ({
-        siret:    e.siret || "—",
-        nom:      e.nom_complet || e.nom_raison_sociale || "—",
-        naf_code: e.activite_principale || "—",
-        naf_lib:  e.libelle_activite_principale || "—",
-        effectif: e.tranche_effectif_salarie || "—",
-        statut:   e.etat_administratif || "—",
-    }));
-}
-
-async function collecterEducation(lat, lon, rayon = 500) {
-    if (!lat || !lon) return [];
-    // The dataset uses 'latitude'/'longitude' fields and 'position' geopoint
-    // within_distance returns 400 — use bounding box approach instead
-    const latDelta = rayon / 111000;  // ~1 deg lat = 111km
-    const lonDelta = rayon / (111000 * Math.cos(lat * Math.PI / 180));
-    const d = await apiFetch("https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records", {
-        where: `latitude >= ${lat - latDelta} AND latitude <= ${lat + latDelta} AND longitude >= ${lon - lonDelta} AND longitude <= ${lon + lonDelta} AND etat = 'OUVERT'`,
-        limit: 10,
-        select: "identifiant_de_l_etablissement,nom_etablissement,type_etablissement,libelle_nature,adresse_1,code_postal,nom_commune,telephone,mail,statut_public_prive,latitude,longitude,siren_siret,apprentissage,hebergement,restauration"
-    });
-    return d?.results || [];
-}
-
-async function collecterDVF(lat, lon, rayon = 150) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://apicarto.ign.fr/api/dvf/mutation", { lon, lat, dist: rayon, limit: 5 });
-    return (d?.features || []).slice(0, 5).map(f => f.properties || {});
-}
-
-async function collecterBenchmark(codeCommune, libelleCommune, hint) {
-    const r = {};
-    // Try by commune name first (more reliable), then by INSEE code
-    const queries = [libelleCommune, codeCommune].filter(Boolean);
-    for (const q of queries) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-commune/lines", { q, size: 3 });
-        if (d?.results?.length) { r.commune = d.results[0]; break; }
-    }
-    if (hint) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-activite/lines", { q: hint, size: 5 });
-        if (d?.results?.length) r.activite = d.results;
-    }
-    return r;
-}
-
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
-
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpeT, dDpeP, dElec, dGaz, dSitadel] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open,categorie_usage_propriete" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1,nb_etages" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire,bat_prop_type_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction,identifiant_reseau" }),
-        bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile,shon" }),
-        bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("sitadel", { ...p1, limit: 5, select: "date_autorisation,type_autorisation,libelle_destination_principale" }),
-    ]);
-
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau);
-
-    // Dynamic resolution of the active DPE
-    let dpe = null, bType = type;
-    const hasT = dDpeT && dDpeT.length > 0;
-    const hasP = dDpeP && dDpeP.length > 0;
-
-    if (hasT && hasP) {
-        dpe = type === "T" ? dDpeT[0] : dDpeP[0];
-        bType = type;
-    } else if (hasT) {
-        dpe = dDpeT[0]; bType = "T";
-    } else if (hasP) {
-        dpe = dDpeP[0]; bType = "P";
+    // -- 3. PPE GAZ -----------------------------------------------------------
+    const gazC = gazs?.[0]?.conso_tot || gaz?.conso_tot || 0;
+    const hasGaz = gazC > 0 || (dpe?.type_energie_chauffage || "").toLowerCase().includes("gaz");
+    const fcuOk = fcu?.fcu_eligible;
+    const fcuD = fcu?.fcu_distance_m;
+    if (hasGaz) {
+        let trend = null;
+        if (gazs?.length >= 2) {
+            const o = gazs[gazs.length - 1]?.conso_tot || 0;
+            const n = gazs[0]?.conso_tot || 0;
+            if (o > 0) trend = Math.round((n - o) / o * 100);
+        }
+        const tm = trend !== null ? (trend < 0 ? " Tendance\u00a0: " + trend + "% vs " + (gazs[gazs.length-1]?.millesime || "r\u00e9f.") + "." : " \u26a0 Hausse +\u202f" + trend + "%.") : "";
+        const fm = fcuOk ? " \u2726 R\u00e9seau chaleur \u00e0 " + fcuD + "m \u2014 alternative d\u00e9carbon\u00e9e." : "";
+        alerts.push({
+            level: fcuOk ? "warning" : "info", icon: "\uD83D\uDD25", title: "PPE \u2014 D\u00e9pendance Gaz Fossile",
+            desc: (gazC / 1000).toFixed(0) + " MWh/an de gaz fossile." + tm + " La PPE 2024-2033 pr\u00e9voit la sortie progressive du gaz tertiaire. Aides CEE et MaPrimeRénov mobilisables." + fm,
+            deadline: "Neutralit\u00e9 carbone cible : 2050 (REPowerEU)"
+        });
+    } else {
+        alerts.push({ level: "compliant", icon: "\u26a1", title: "PPE \u2014 Z\u00e9ro Gaz Fossile",
+            desc: "Aucune consommation de gaz fossile d\u00e9tect\u00e9e. Align\u00e9 avec les objectifs PPE.",
+            deadline: null });
     }
 
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}];
-    const gazs  = dGaz?.length  ? dGaz  : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const lat = res.lat, lon = res.lon;
-    const codeInsee = res.code_commune_insee || base?.code_commune_insee;
-
-    // Call all new APIs in parallel
-    const libelleCommune = base?.libelle_commune_insee;
-    const [ademeRes, dGeo, dFcu, dSirene, dEdu, dDvf, dBench] = await Promise.all([
-        collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe)),
-        collecterGeoriques(lat, lon, codeInsee),
-        collecterFCU(lat, lon),
-        collecterSIRENE(lat, lon),
-        collecterEducation(lat, lon, 500),
-        collecterDVF(lat, lon, 300),
-        collecterBenchmark(codeInsee, libelleCommune, null),
-    ]);
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs,
-        ademe: ademeRes.resultats, bType,
-        sitadel: dSitadel || [],
-        geo: dGeo || {},
-        fcu: dFcu || null,
-        sirene: dSirene || [],
-        education: dEdu || [],
-        dvf: dDvf || [],
-        benchmark: dBench || {},
-    };
-}
-
-async function apiFetch(url, params = {}) {
-    try {
-        const qs = new URLSearchParams(params).toString();
-        const r = await fetch(qs ? `${url}?${qs}` : url, { headers: { "Accept": "application/json" } });
-        return r.ok ? r.json() : null;
-    } catch { return null; }
-}
-
-async function collecterGeoriques(lat, lon, codeInsee) {
-    if (!lat || !lon) return {};
-    const geo = (url, p) => apiFetch(url, p);
-    const base = "https://georisques.gouv.fr/api/v1";
-    const [dArgile, dSismo, dAzi, dCavites, dIcpe, dCatnat, dRadon] = await Promise.all([
-        geo(`${base}/argiles`,                { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/zonage-sismique`,          { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/azi`,                      { latlon: `${lon},${lat}`, rayon: 200 }),
-        geo(`${base}/cavites`,                  { latlon: `${lon},${lat}`, rayon: 500 }),
-        geo(`${base}/installations-classees`,   { latlon: `${lon},${lat}`, rayon: 500 }),
-        codeInsee ? geo(`${base}/gaspar/catnat`,{ code_insee_commune: codeInsee, page: 1, page_size: 5 }) : Promise.resolve(null),
-        codeInsee ? geo(`${base}/radon`,        { code_insee: codeInsee }) : Promise.resolve(null),
-    ]);
-    const r = {};
-    if (dArgile?.data?.[0]) { r.argile_alea = dArgile.data[0].lib_risque_jo || dArgile.data[0].code_alea || "—"; r.argile_code = dArgile.data[0].code_alea || "—"; }
-    if (dSismo?.data?.[0])  { r.sismique_zone = dSismo.data[0].zone || "—"; r.sismique_lib = dSismo.data[0].lib_zone || "—"; }
-    if (dRadon?.data?.[0])  r.radon_classe = dRadon.data[0].classe_potentiel || "—";
-    r.inondation_nb = dAzi?.data?.length || 0;
-    r.inondation_detail = dAzi?.data?.slice(0,3).map(x => x.lib_type_alea || x.typeAlea || "").join(", ") || "Aucune zone";
-    r.cavites_nb = dCavites?.data?.length || 0;
-    r.cavites_types = [...new Set((dCavites?.data || []).slice(0,5).map(x => x.typeCavite || ""))].join(", ") || "—";
-    r.icpe_nb = dIcpe?.data?.length || 0;
-    r.icpe_noms = (dIcpe?.data || []).slice(0,3).map(x => x.raisonSociale || x.nomEtab || "").join(", ") || "—";
-    r.catnat_nb = dCatnat?.total || dCatnat?.data?.length || 0;
-    r.catnat_types = [...new Set((dCatnat?.data || []).slice(0,5).map(x => x.libDomCatNat || ""))].join(", ") || "—";
-    r.catnat_derniere = dCatnat?.data?.[0]?.datFin || dCatnat?.data?.[0]?.dateDeb || "—";
-    return r;
-}
-
-async function collecterFCU(lat, lon) {
-    if (!lat || !lon) return null;
-    const d = await apiFetch("https://france-chaleur-urbaine.beta.gouv.fr/api/v1/eligibility", { lat, lon });
-    if (!d) return null;
-    return {
-        eligible:   d.isEligible ?? d.eligible ?? false,
-        distance_m: d.distance ?? d.distanceToNetwork ?? "—",
-        nom:        d.networkName ?? d.nom ?? "—",
-        id:         d.networkId ?? d.identifiant_reseau ?? "—",
-        enr_pct:    d.tauxENRR ?? "—",
-        co2:        d.emissionCO2 ?? "—",
-    };
-}
-
-async function collecterSIRENE(lat, lon, rayon = 0.2) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://recherche-entreprises.api.gouv.fr/search", { lat, long: lon, radius: rayon, per_page: 10 });
-    return (d?.results || []).slice(0, 10).map(e => ({
-        siret:    e.siret || "—",
-        nom:      e.nom_complet || e.nom_raison_sociale || "—",
-        naf_code: e.activite_principale || "—",
-        naf_lib:  e.libelle_activite_principale || "—",
-        effectif: e.tranche_effectif_salarie || "—",
-        statut:   e.etat_administratif || "—",
-    }));
-}
-
-async function collecterEducation(lat, lon, rayon = 500) {
-    if (!lat || !lon) return [];
-    // The dataset uses 'latitude'/'longitude' fields and 'position' geopoint
-    // within_distance returns 400 — use bounding box approach instead
-    const latDelta = rayon / 111000;  // ~1 deg lat = 111km
-    const lonDelta = rayon / (111000 * Math.cos(lat * Math.PI / 180));
-    const d = await apiFetch("https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records", {
-        where: `latitude >= ${lat - latDelta} AND latitude <= ${lat + latDelta} AND longitude >= ${lon - lonDelta} AND longitude <= ${lon + lonDelta} AND etat = 'OUVERT'`,
-        limit: 10,
-        select: "identifiant_de_l_etablissement,nom_etablissement,type_etablissement,libelle_nature,adresse_1,code_postal,nom_commune,telephone,mail,statut_public_prive,latitude,longitude,siren_siret,apprentissage,hebergement,restauration"
-    });
-    return d?.results || [];
-}
-
-async function collecterDVF(lat, lon, rayon = 150) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://apicarto.ign.fr/api/dvf/mutation", { lon, lat, dist: rayon, limit: 5 });
-    return (d?.features || []).slice(0, 5).map(f => f.properties || {});
-}
-
-async function collecterBenchmark(codeCommune, libelleCommune, hint) {
-    const r = {};
-    // Try by commune name first (more reliable), then by INSEE code
-    const queries = [libelleCommune, codeCommune].filter(Boolean);
-    for (const q of queries) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-commune/lines", { q, size: 3 });
-        if (d?.results?.length) { r.commune = d.results[0]; break; }
-    }
-    if (hint) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-activite/lines", { q: hint, size: 5 });
-        if (d?.results?.length) r.activite = d.results;
-    }
-    return r;
-}
-
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
-
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpeT, dDpeP, dElec, dGaz, dSitadel] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open,categorie_usage_propriete" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1,nb_etages" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire,bat_prop_type_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction,identifiant_reseau" }),
-        bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile,shon" }),
-        bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("sitadel", { ...p1, limit: 5, select: "date_autorisation,type_autorisation,libelle_destination_principale" }),
-    ]);
-
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau);
-
-    // Dynamic resolution of the active DPE
-    let dpe = null, bType = type;
-    const hasT = dDpeT && dDpeT.length > 0;
-    const hasP = dDpeP && dDpeP.length > 0;
-
-    if (hasT && hasP) {
-        dpe = type === "T" ? dDpeT[0] : dDpeP[0];
-        bType = type;
-    } else if (hasT) {
-        dpe = dDpeT[0]; bType = "T";
-    } else if (hasP) {
-        dpe = dDpeP[0]; bType = "P";
+    // -- 4. FCU OPPORTUNITE ---------------------------------------------------
+    if (fcuOk && Number(fcuD) <= 50) {
+        alerts.push({ level: "info", icon: "\uD83C\uDF3F", title: "Opportunit\u00e9 \u2014 R\u00e9seau Chaleur Imm\u00e9diat",
+            desc: "R\u00e9seau de chaleur \u00e0 " + fcuD + "m. Raccordement possible imm\u00e9diatement pour d\u00e9carboner le chauffage et am\u00e9liorer le DPE.",
+            deadline: "Action possible : d\u00e8s maintenant" });
     }
 
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}];
-    const gazs  = dGaz?.length  ? dGaz  : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const lat = res.lat, lon = res.lon;
-    const codeInsee = res.code_commune_insee || base?.code_commune_insee;
-
-    // Call all new APIs in parallel
-    const libelleCommune = base?.libelle_commune_insee;
-    const [ademeRes, dGeo, dFcu, dSirene, dEdu, dDvf, dBench] = await Promise.all([
-        collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe)),
-        collecterGeoriques(lat, lon, codeInsee),
-        collecterFCU(lat, lon),
-        collecterSIRENE(lat, lon),
-        collecterEducation(lat, lon, 500),
-        collecterDVF(lat, lon, 300),
-        collecterBenchmark(codeInsee, libelleCommune, null),
-    ]);
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs,
-        ademe: ademeRes.resultats, bType,
-        sitadel: dSitadel || [],
-        geo: dGeo || {},
-        fcu: dFcu || null,
-        sirene: dSirene || [],
-        education: dEdu || [],
-        dvf: dDvf || [],
-        benchmark: dBench || {},
-    };
+    return alerts;
 }
 
-async function apiFetch(url, params = {}) {
-    try {
-        const qs = new URLSearchParams(params).toString();
-        const r = await fetch(qs ? `${url}?${qs}` : url, { headers: { "Accept": "application/json" } });
-        return r.ok ? r.json() : null;
-    } catch { return null; }
-}
-
-async function collecterGeoriques(lat, lon, codeInsee) {
-    if (!lat || !lon) return {};
-    const geo = (url, p) => apiFetch(url, p);
-    const base = "https://georisques.gouv.fr/api/v1";
-    const [dArgile, dSismo, dAzi, dCavites, dIcpe, dCatnat, dRadon] = await Promise.all([
-        geo(`${base}/argiles`,              { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/zonage-sismique`,      { latlon: `${lon},${lat}`, rayon: 100 }),
-        geo(`${base}/azi`,                  { latlon: `${lon},${lat}`, rayon: 200 }),
-        geo(`${base}/cavites`,              { latlon: `${lon},${lat}`, rayon: 500 }),
-        geo(`${base}/installations-classees`,{ latlon: `${lon},${lat}`, rayon: 500 }),
-        codeInsee ? geo(`${base}/gaspar/catnat`, { code_insee_commune: codeInsee, page: 1, page_size: 5 }) : Promise.resolve(null),
-        codeInsee ? geo(`${base}/radon`,         { code_insee: codeInsee }) : Promise.resolve(null),
-    ]);
-    const r = {};
-    // Argile
-    if (dArgile?.data?.[0]) { r.argile_alea = dArgile.data[0].lib_risque_jo || dArgile.data[0].code_alea || "—"; r.argile_code = dArgile.data[0].code_alea || "—"; }
-    // Sismique
-    if (dSismo?.data?.[0])  { r.sismique_zone = dSismo.data[0].zone || dSismo.data[0].code_zone || "—"; r.sismique_lib = dSismo.data[0].lib_zone || "—"; }
-    // Radon
-    if (dRadon?.data?.[0])  r.radon_classe = dRadon.data[0].classe_potentiel || "—";
-    // Inondation — matches Python key: inondation_nb_zones
-    r.inondation_nb_zones = dAzi?.data?.length || 0;
-    r.inondation_detail   = dAzi?.data?.slice(0,3).map(x => x.lib_type_alea || x.typeAlea || "").join(", ") || "Aucune zone";
-    // Cavités
-    r.cavites_nb    = dCavites?.data?.length || 0;
-    r.cavites_types = [...new Set((dCavites?.data || []).slice(0,5).map(x => x.typeCavite || ""))].join(", ") || "—";
-    // ICPE — matches Python key: icpe_rayon_500m
-    r.icpe_rayon_500m = dIcpe?.data?.length || 0;
-    r.icpe_noms       = (dIcpe?.data || []).slice(0,3).map(x => x.raisonSociale || x.nomEtab || "").join(", ") || "—";
-    // CatNat
-    r.catnat_nb      = dCatnat?.total || dCatnat?.data?.length || 0;
-    r.catnat_types   = [...new Set((dCatnat?.data || []).slice(0,5).map(x => x.libDomCatNat || ""))].join(", ") || "—";
-    r.catnat_derniere = dCatnat?.data?.[0]?.datFin || dCatnat?.data?.[0]?.dateDeb || "—";
-    return r;
-}
-
-async function collecterFCU(lat, lon) {
-    if (!lat || !lon) return null;
-    const d = await apiFetch("https://france-chaleur-urbaine.beta.gouv.fr/api/v1/eligibility", { lat, lon });
-    if (!d) return null;
-    // Keys match Python: fcu_ prefix
-    return {
-        fcu_eligible:   d.isEligible ?? d.eligible ?? false,
-        fcu_distance_m: d.distance ?? d.distanceToNetwork ?? "—",
-        fcu_reseau_nom: d.networkName ?? d.nom ?? "—",
-        fcu_reseau_id:  d.networkId ?? d.identifiant_reseau ?? "—",
-        fcu_enr_pct:    d.tauxENRR ?? "—",
-        fcu_co2:        d.emissionCO2 ?? "—",
-    };
-}
-
-async function collecterSIRENE(lat, lon, rayon = 0.08) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://recherche-entreprises.api.gouv.fr/search", { lat, long: lon, radius: rayon, per_page: 10 });
-    return (d?.results || []).slice(0, 10).map(e => ({
-        siret:       e.siret || "—",
-        nom:         e.nom_complet || e.nom_raison_sociale || "—",
-        naf_code:    e.activite_principale || "—",
-        naf_libelle: e.libelle_activite_principale || "—",
-        adresse:     e.adresse || "—",
-        effectif:    e.tranche_effectif_salarie || "—",
-        statut:      e.etat_administratif || "—",
-    }));
-}
-
-async function collecterEducation(lat, lon, rayon = 500) {
-    if (!lat || !lon) return [];
-    // The dataset uses 'latitude'/'longitude' fields and 'position' geopoint
-    // within_distance returns 400 — use bounding box approach instead
-    const latDelta = rayon / 111000;  // ~1 deg lat = 111km
-    const lonDelta = rayon / (111000 * Math.cos(lat * Math.PI / 180));
-    const d = await apiFetch("https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records", {
-        where: `latitude >= ${lat - latDelta} AND latitude <= ${lat + latDelta} AND longitude >= ${lon - lonDelta} AND longitude <= ${lon + lonDelta} AND etat = 'OUVERT'`,
-        limit: 10,
-        select: "identifiant_de_l_etablissement,nom_etablissement,type_etablissement,libelle_nature,adresse_1,code_postal,nom_commune,telephone,mail,statut_public_prive,latitude,longitude,siren_siret,apprentissage,hebergement,restauration"
-    });
-    return d?.results || [];
-}
-
-async function collecterDVF(lat, lon, rayon = 150) {
-    if (!lat || !lon) return [];
-    const d = await apiFetch("https://apicarto.ign.fr/api/dvf/mutation", { lon, lat, dist: rayon, limit: 5 });
-    return (d?.features || []).slice(0, 5).map(f => f.properties || {});
-}
-
-async function collecterBenchmark(codeCommune, libelleCommune, hint) {
-    const r = {};
-    // Try by commune name first (more reliable), then by INSEE code
-    const queries = [libelleCommune, codeCommune].filter(Boolean);
-    for (const q of queries) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-commune/lines", { q, size: 3 });
-        if (d?.results?.length) { r.commune = d.results[0]; break; }
-    }
-    if (hint) {
-        const d = await apiFetch("https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-activite/lines", { q: hint, size: 5 });
-        if (d?.results?.length) r.activite = d.results;
-    }
-    return r;
-}
-
-async function fetchBuildingData(rnbId, type, adresseLabel, cleBan) {
-    const res = await resoudreEntree(rnbId);
-    const batId = res.bat_id_bdnb;
-    if (!batId) return { res, error: "BDNB missing" };
-    
-    const p1 = { batiment_groupe_id: `eq.${batId}`, limit: 1 };
-    const pm = { batiment_groupe_id: `eq.${batId}`, order: "millesime.desc", limit: 4 };
-
-    const [dBase, dUsage, dFfo, dTopo, dProp, dRisque, dReseau, dDpeT, dDpeP, dElec, dGaz, dSitadel] = await Promise.all([
-        bdnbQuery("batiment_groupe", { ...p1, select: "code_commune_insee,libelle_commune_insee,code_iris,s_geom_groupe" }),
-        bdnbQuery("batiment_groupe_synthese_propriete_usage", { ...p1, select: "usage_principal_bdnb_open,categorie_usage_propriete" }),
-        bdnbQuery("batiment_groupe_ffo_bat", { ...p1, select: "annee_construction,mat_mur_txt,mat_toit_txt,usage_niveau_1_txt,nb_niveau,nb_log" }),
-        bdnbQuery("batiment_groupe_bdtopo_bat", { ...p1, select: "hauteur_mean,altitude_sol_mean,l_usage_1,nb_etages" }),
-        bdnbQuery("batiment_groupe_proprietaire", { ...p1, select: "bat_prop_denomination_proprietaire,bat_prop_type_proprietaire" }),
-        bdnbQuery("batiment_groupe_risques", { ...p1, select: "alea_argile,alea_radon,alea_sismique" }),
-        bdnbQuery("batiment_groupe_indicateur_reseau_chaud_froid", { ...p1, select: "indicateur_distance_au_reseau,reseau_en_construction,identifiant_reseau" }),
-        bdnbQuery("batiment_groupe_dpe_tertiaire", { ...p1, select: "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile,shon" }),
-        bdnbQuery("batiment_groupe_dpe_representatif_logement", { ...p1, select: "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble" }),
-        bdnbQuery("batiment_groupe_dle_elec_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("batiment_groupe_dle_gaz_multimillesime", { ...pm, select: "millesime,nb_pdl_tot,conso_tot" }),
-        bdnbQuery("sitadel", { ...p1, limit: 5, select: "date_autorisation,type_autorisation,libelle_destination_principale" }),
-    ]);
-
-    const base = first(dBase), usage = first(dUsage), ffo = first(dFfo),
-          topo = first(dTopo), prop = first(dProp), risque = first(dRisque),
-          reseau = first(dReseau);
-
-    // Dynamic resolution of the active DPE
-    let dpe = null, bType = type;
-    const hasT = dDpeT && dDpeT.length > 0;
-    const hasP = dDpeP && dDpeP.length > 0;
-
-    if (hasT && hasP) {
-        dpe = type === "T" ? dDpeT[0] : dDpeP[0];
-        bType = type;
-    } else if (hasT) {
-        dpe = dDpeT[0]; bType = "T";
-    } else if (hasP) {
-        dpe = dDpeP[0]; bType = "P";
-    }
-
-    const elecs = dElec?.length ? dElec : [{millesime: "2022"}];
-    const gazs  = dGaz?.length  ? dGaz  : [{millesime: "2022"}];
-    const elec = elecs[0], gaz = gazs[0];
-
-    const lat = res.lat, lon = res.lon;
-    const codeInsee = res.code_commune_insee || base?.code_commune_insee;
-
-    // Call all new APIs in parallel
-    const libelleCommune = base?.libelle_commune_insee;
-    const [ademeRes, dGeo, dFcu, dSirene, dEdu, dDvf, dBench] = await Promise.all([
-        collecterADEME(rnbId, res.adresse_label || adresseLabel, res.cle_ban || cleBan, bType, val(dpe?.identifiant_dpe)),
-        collecterGeoriques(lat, lon, codeInsee),
-        collecterFCU(lat, lon),
-        collecterSIRENE(lat, lon),
-        collecterEducation(lat, lon, 500),
-        collecterDVF(lat, lon, 300),
-        collecterBenchmark(codeInsee, libelleCommune, null),
-    ]);
-
-    return {
-        res, base, usage, ffo, topo, prop, risque, reseau, dpe, elec, gaz, elecs, gazs,
-        ademe: ademeRes.resultats, bType,
-        sitadel: dSitadel || [],
-        geo: dGeo || {},
-        fcu: dFcu || null,
-        sirene: dSirene || [],
-        education: dEdu || [],
-        dvf: dDvf || [],
-        benchmark: dBench || {},
-    };
-}
 
 async function runMultiScan() {
     if (selectedRnbIds.size === 0) return;
@@ -2037,7 +1027,7 @@ async function runMultiScan() {
             if (b.elecs) { b.elecs.forEach(e => { if (e.millesime) gElecs[e.millesime] = (gElecs[e.millesime]||0) + Number(e.conso_tot||0); }); }
             if (b.gazs) { b.gazs.forEach(g => { if (g.millesime) gGazs[g.millesime] = (gGazs[g.millesime]||0) + Number(g.conso_tot||0); }); }
             
-            for(const a of b.ademe) {
+            for(const a of (b.ademeRes?.resultats || [])) {
                 const k = a.numero_dpe || a.Numero_DPE || Math.random();
                 if(!ademeSeen.has(k)) { ademeSeen.add(k); global.ademe.push(a); }
             }
@@ -2051,7 +1041,7 @@ async function runMultiScan() {
         global.base.code_commune_insee = validBuildings[0].base.code_commune_insee;
         
         scanData = {
-            adresse: entreeInput || validBuildings[0].res.adresse_label || "Selected Zone",
+            adresse: entreeInput || validBuildings[0]?.res?.adresse_label || "Selected Zone",
             firstRes: validBuildings[0].res,
             mode: validBuildings.length > 1 ? "multi" : "single",
             global: global,
@@ -2096,7 +1086,7 @@ function renderResultsTabs() {
         
         scanData.buildings.forEach((b, i) => {
             const btnB = document.createElement("button");
-            btnB.textContent = `Bat ${i+1} : ${b.res.adresse_label || b.res.rnb_id || 'Unknown'}`;
+            btnB.textContent = `Bat ${i+1} : ${b.res?.adresse_label || b.res?.rnb_id || 'Unknown'}`;
             btnB.onclick = () => {
                 Array.from(tabsContainer.children).forEach(btn => btn.classList.remove("active"));
                 btnB.classList.add("active");
@@ -2131,7 +1121,7 @@ function renderResultsDOM(dataCtx, mode, resObj) {
 
     // Banner
     const rType = isGlobal ? currentType : (dataCtx.bType || currentType);
-    const adresseAffichee = isGlobal ? `Global Preview – ${dataCtx.count} ${rType === "T" ? "Commercial" : "Residential"} Buildings Selected` : (resObj.adresse_label || resObj.rnb_id || "Building Result");
+    const adresseAffichee = isGlobal ? `Global Preview – ${dataCtx.count} ${rType === "T" ? "Commercial" : "Residential"} Buildings Selected` : (resObj?.adresse_label || resObj?.rnb_id || "Building Result");
     $("result-address").textContent = adresseAffichee;
     $("badge-type").textContent = rType === "T" ? "Commercial" : "Residential";
 
@@ -2158,6 +1148,8 @@ function renderResultsDOM(dataCtx, mode, resObj) {
     clearAndAppendRows("data-location", [
         ["Commune (Code)", `${val(base?.libelle_commune_insee)} (${val(base?.code_commune_insee)})`],
         ["IRIS Code", val(base?.code_iris)],
+        ["QPV (Quartier Prioritaire)", dataCtx.qpv && val(dataCtx.qpv.quartier_prioritaire) !== "—" && val(dataCtx.qpv.quartier_prioritaire) !== "false" ? `${val(dataCtx.qpv.nom_quartier)}` : "—"],
+        ["Fiabilité Géocodage GeoSpx", dataCtx.geoSpx && dataCtx.geoSpx.fiabilite_adresse ? `${dataCtx.geoSpx.fiabilite_adresse}` : "—"],
         ...(!isGlobal ? [
             ["Coordinates (Lat, Lon)", resObj?.lat ? `${resObj.lat}, ${resObj.lon}` : "—"]
         ] : [])
@@ -2270,6 +1262,29 @@ function renderResultsDOM(dataCtx, mode, resObj) {
     renderConsoSection("Electricity", dataCtx.elecs, "elec", "⚡");
     renderConsoSection("Gas", dataCtx.gazs, "gaz", "🔥");
 
+    // ── REGULATORY ALERTS ──────────────────────────────────────────────────
+    const alertsList = computeAlerts(dataCtx);
+    const alertsSection = $("section-alerts");
+    const alertsDiv = $("data-alerts");
+    alertsDiv.innerHTML = "";
+    if (alertsList.length > 0) {
+        alertsSection.style.display = "";
+        alertsList.forEach(a => {
+            const card = document.createElement("div");
+            card.className = `alert-card ${a.level}`;
+            card.innerHTML = `
+                <div class="alert-icon">${a.icon}</div>
+                <div class="alert-body">
+                    <div class="alert-title">${a.title}</div>
+                    <div class="alert-desc">${a.desc}</div>
+                    ${a.deadline ? `<span class="alert-deadline">${a.deadline}</span>` : ""}
+                </div>`;
+            alertsDiv.appendChild(card);
+        });
+    } else {
+        alertsSection.style.display = "none";
+    }
+
     // Risks (BDNB + Géorisques enrichi) — keys aligned with Python
     const geo = dataCtx.geo || {};
     clearAndAppendRows("data-risks", [
@@ -2334,6 +1349,99 @@ function renderResultsDOM(dataCtx, mode, resObj) {
         }
     } else {
         benchSection.style.display = "none";
+    }
+
+
+    // Urbanisme (BDNB)
+    const urba = dataCtx.urba;
+    const urbaSection = $("section-urba");
+    if (urba) {
+        urbaSection.style.display = "";
+        clearAndAppendRows("data-urba", [
+            ["Monument Historique", val(urba.monument_historique)],
+            ["Dénomination MH", val(urba.denomination_monument_historique)],
+            ["Distance MH", urba.distance_monument_historique ? `${urba.distance_monument_historique} m` : "—"],
+            ["Zone PLU Patrimonial", val(urba.zone_plu_bati_patrimonial)],
+            ["Contrainte Urbanisme AC1", val(urba.contrainte_urbanisme_ac1)]
+        ]);
+    } else {
+        urbaSection.style.display = "none";
+    }
+
+    // GPU IGN
+    const gpu = dataCtx.dGpu;
+    const gpuSection = $("section-gpu");
+    if (gpu && !gpu.error && (gpu.zone_plu || (gpu.prescriptions && gpu.prescriptions.length) || (gpu.sup && gpu.sup.length))) {
+        gpuSection.style.display = "";
+        clearAndAppendRows("data-gpu", [
+            ["Zone PLU", gpu.zone_plu ? `${gpu.zone_plu.libelle} (Type: ${gpu.zone_plu.typezone || "—"})` : "—"],
+            ["Prescriptions", gpu.prescriptions && gpu.prescriptions.length > 0 ? `${gpu.prescriptions.length} prescription(s)` : "Aucune"],
+            ["Servitudes (SUP)", gpu.sup && gpu.sup.length > 0 ? `${gpu.sup.length} servitude(s)` : "Aucune"]
+        ]);
+    } else {
+        gpuSection.style.display = "none";
+    }
+
+    // Propriété & Social (RNC / RPLS)
+    const rnc = dataCtx.rnc;
+    const rpls = dataCtx.rpls;
+    const coproSection = $("section-copro");
+    if (rnc || rpls) {
+        coproSection.style.display = "";
+        clearAndAppendRows("data-copro", [
+            ["Nom Copropriété", val(rnc?.l_nom_copro)],
+            ["Immatriculation (RNC)", val(rnc?.numero_immat_principal)],
+            ["Nb. Lots Total", val(rnc?.nb_lot_tot)],
+            ["Nb. Lots Tertiaires", val(rnc?.nb_lot_tertiaire)],
+            ["Logements Sociaux (RPLS)", val(rpls?.nb_log)],
+            ["Bâtiment Accessible PMR", val(rpls?.accessible_pmr)],
+            ["Construction Type", val(rpls?.type_construction)]
+        ]);
+    } else {
+        coproSection.style.display = "none";
+    }
+
+    // BPE & Activités
+    const bpe = dataCtx.bpe;
+    const zoac = dataCtx.zoac;
+    const topoEqu = dataCtx.topoEqu;
+    const equipSection = $("section-equip");
+    if (bpe || zoac || topoEqu) {
+        equipSection.style.display = "";
+        clearAndAppendRows("data-equip", [
+            ["Équipement BPE (INSEE)", val(bpe?.l_type_equipement)],
+            ["Zone d'Activité (ZOAC)", val(zoac?.l_toponyme) + (zoac?.l_nature ? ` (${zoac.l_nature})` : "")],
+            ["Équipement BDTopo", val(topoEqu?.l_toponyme) + (topoEqu?.l_nature ? ` (${topoEqu.l_nature})` : "")]
+        ]);
+    } else {
+        equipSection.style.display = "none";
+    }
+
+    // Numérique (HTHD) & QPV
+    const hthd = dataCtx.hthd;
+    const numSection = $("section-num");
+    if (hthd) {
+        numSection.style.display = "";
+        clearAndAppendRows("data-num", [
+            ["Nb. points livraison (PDL)", val(hthd?.nb_pdl)],
+            ["Type d'équipement", val(hthd?.l_type_pdl)],
+            ["Nom de l'équipement", val(hthd?.l_nom_pdl)]
+        ]);
+    } else {
+        numSection.style.display = "none";
+    }
+
+    // API Entreprise (DINUM)
+    const dinum = dataCtx.dDinum;
+    const dinumSection = $("section-dinum");
+    if (dinum) {
+        dinumSection.style.display = "";
+        clearAndAppendRows("data-dinum", [
+            ["Connection Status", dinum.isStub ? "Stub (Habilitation required)" : "Connected"],
+            ["Details", dinum.isStub ? `<a href="https://api.gouv.fr/les-api/api-entreprise" target="_blank" style="color:var(--akila-blue);text-decoration:none;">Requiert Habilitation &rarr;</a>` : val(dinum.desc)]
+        ]);
+    } else {
+        dinumSection.style.display = "none";
     }
 
     // SIRENE

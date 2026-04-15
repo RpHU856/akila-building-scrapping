@@ -1,31 +1,31 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  AKILA_prospect_v2.py — Scanner Full-Stack Bâtiment                        ║
+║  AKILA_prospect_v2.py — Scanner Full-Stack Bâtiment  (version 2.1)         ║
 ║                                                                              ║
-║  Entrée   : RNB / Clé BAN / Adresse libre                                  ║
-║  Sortie   : Terminal structuré + JSON automatique + XLS DPE complet         ║
+║  CORRECTIONS v2.1                                                            ║
+║    • ADEME conso tertiaire : slugs corrigés (consommation-tertiaire-*)      ║
+║    • DVF : supprimé apicarto inexistant → tables BDNB natives               ║
+║    • SITADEL : noms de champs corrigés (date_reelle_autorisation…)          ║
+║    • Propriétaire : table rel_batiment_groupe_proprietaire_siren_open        ║
 ║                                                                              ║
-║  SOURCES INTÉGRÉES (15 APIs / datasets)                                     ║
-║  ── Identité & Géométrie ──────────────────────────────────────────────     ║
-║    • RNB        Registre National des Bâtiments (rnb_id, statut, géom)     ║
-║    • BAN        Base Adresse Nationale (géocodage, cle_interop)             ║
-║    • BDNB       Base Données Nationale Bâtiments (CSTB) — 30+ tables       ║
-║  ── Énergie & DPE ─────────────────────────────────────────────────────     ║
-║    • ADEME      DPE Logements existants / neufs / tertiaire (open data)    ║
-║    • ADEME      Observatoire DPE-Audit (XLS complet 475 variables)         ║
-║    • ADEME      Conso tertiaire par activité (benchmark kWh/m²)            ║
-║    • ADEME      Conso tertiaire par commune (comparaison territoriale)      ║
-║    • ADEME      Conso par vecteur énergétique (gaz/élec/chaleur)           ║
-║  ── Risques & Environnement ───────────────────────────────────────────     ║
-║    • Géorisques API v1 — argile, radon, sismique, inondation, ICPE, catnat ║
-║  ── Réseaux de chaleur ────────────────────────────────────────────────     ║
-║    • France Chaleur Urbaine — éligibilité + distance réseau par GPS        ║
-║  ── Occupation & Usage ────────────────────────────────────────────────     ║
-║    • SIRENE BAN  Entreprises géolocalisées sur la parcelle (SIRET, NAF)    ║
-║    • Annuaire Éducation Nationale (lycées/établissements scolaires)        ║
-║  ── Transactions & Foncier ────────────────────────────────────────────     ║
-║    • DVF         Demandes de Valeurs Foncières géolocalisées               ║
-║    • SITADEL     Permis de construire (via BDNB)                           ║
+║  NOUVELLES TABLES BDNB (v2.1)                                               ║
+║    • batiment_groupe_dvf_open_statistique   DVF stats (prix/m², mutations)  ║
+║    • batiment_groupe_dvf_open_representatif Dernière transaction DVF        ║
+║    • rel_batiment_groupe_dpe_tertiaire_complet Consos vecteur détaillées    ║
+║    • rel_batiment_groupe_dpe_logement_complet  Déperditions détaillées      ║
+║    • batiment_groupe_urbanisme              MH, PLU patrimonial              ║
+║    • batiment_groupe_bpe                   Équipements INSEE (BPE)          ║
+║    • batiment_groupe_rnc                   Registre Copropriétés            ║
+║    • batiment_groupe_rpls                  Logements sociaux                ║
+║    • batiment_groupe_qpv                   Quartier Prioritaire Ville       ║
+║    • batiment_groupe_hthd                  Très Haut Débit ARCEP            ║
+║    • batiment_groupe_geospx                Fiabilité géocodage              ║
+║    • batiment_groupe_bdtopo_zoac           Zones d'activité                 ║
+║    • batiment_groupe_bdtopo_equ            Équipements BD TOPO              ║
+║                                                                              ║
+║  NOUVELLES APIs EXTERNES (v2.1)                                             ║
+║    • API Carto GPU (IGN)  Zone PLU, prescriptions, servitudes               ║
+║    • API Entreprise DINUM (habilitation)  Liasses fiscales, Qualibat        ║
 ║                                                                              ║
 ║  Prérequis : pip install requests pandas openpyxl                           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -35,25 +35,33 @@ import requests, json, sys, ast, os, re
 from datetime import datetime
 import unicodedata
 
-# ── URLS ──────────────────────────────────────────────────────────────────────
+# ── URLS VÉRIFIÉES ────────────────────────────────────────────────────────────
 RNB_BASE        = "https://rnb-api.beta.gouv.fr/api/alpha/buildings"
 BAN_URL         = "https://api-adresse.data.gouv.fr/search/"
 BDNB_URL        = "https://api.bdnb.io/v1/bdnb/donnees"
+
+# ADEME — DPE open data
 ADEME_TERT_OLD  = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe-tertiaire/lines"
 ADEME_TERT_NEW  = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe01tertiaire/lines"
 ADEME_LOG_OLD   = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe-france/lines"
 ADEME_LOG_EXIST = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines"
 ADEME_LOG_NEUF  = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe02neuf/lines"
 OBS_BASE        = "https://observatoire-dpe-audit.ademe.fr"
+
+# ADEME — Conso tertiaire (slugs CORRIGÉS v2.1)
+ADEME_CONSO_ACT  = "https://data.ademe.fr/data-fair/api/v1/datasets/consommation-tertiaire-activite/lines"
+ADEME_CONSO_COM  = "https://data.ademe.fr/data-fair/api/v1/datasets/consommation-tertiaire-commune/lines"
+ADEME_CONSO_VECT = "https://data.ademe.fr/data-fair/api/v1/datasets/consommation-tertiaire-vecteur-energetique/lines"
+
+# APIs externes
 GEORISQUES_BASE = "https://georisques.gouv.fr/api/v1"
-FCU_BASE        = "https://france-chaleur-urbaine.beta.gouv.fr/api/v1"
+FCU_BASE        = "https://france-chaleur-urbaine.beta.gouv.fr/api"  # base sans /v1
+GPU_BASE        = "https://apicarto.ign.fr/api/gpu"                  # API Carto Géoportail Urbanisme
 SIRENE_BASE     = "https://recherche-entreprises.api.gouv.fr/search"
 EDU_URL         = "https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records"
-DVF_URL         = "https://apicarto.ign.fr/api/dvf/mutation"
-ADEME_CONSO_ACT = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-activite/lines"
-ADEME_CONSO_COM = "https://data.ademe.fr/data-fair/api/v1/datasets/dpe-conso-tertiaire-par-commune/lines"
+API_ENT_BASE    = "https://entreprise.api.gouv.fr/v3"               # API Entreprise DINUM (habilitation)
 
-HEADERS = {"User-Agent": "AKILA-Prospect/2.0", "Accept": "application/json"}
+HEADERS = {"User-Agent": "AKILA-Prospect/2.1", "Accept": "application/json"}
 SEP  = "─" * 72
 SEP2 = "═" * 72
 
@@ -95,9 +103,17 @@ def titre(texte):
 def section(texte):
     print(f"\n  {texte}\n  {'─'*50}")
 
+def eur(val):
+    try: return f"{int(float(str(val).replace(',','.'))):,}".replace(",", " ") + " €"
+    except Exception: return str(val)
+
+def kWh(val):
+    try: return f"{round(float(val)):,}".replace(",", " ") + " kWh"
+    except Exception: return str(val)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RÉSOLUTION ENTRÉE (RNB / BAN / Adresse)
+# RÉSOLUTION ENTRÉE
 # ─────────────────────────────────────────────────────────────────────────────
 def detecter_type_entree(entree):
     e = entree.strip().upper()
@@ -169,7 +185,10 @@ def resoudre_entree(entree):
         if link: res["bat_id_bdnb"] = link[0].get("batiment_groupe_id")
 
     if not res["bat_id_bdnb"] and res["cle_ban"]:
-        for table, champ in [("batiment_groupe_adresse", "cle_interop_adr_principale_ban"), ("rel_batiment_groupe_adresse", "cle_interop_adr")]:
+        for table, champ in [
+            ("batiment_groupe_adresse", "cle_interop_adr_principale_ban"),
+            ("rel_batiment_groupe_adresse", "cle_interop_adr")
+        ]:
             rows = bdnb(table, {champ: f"eq.{res['cle_ban']}", "select": "batiment_groupe_id", "limit": 1})
             if rows: res["bat_id_bdnb"] = rows[0].get("batiment_groupe_id"); break
 
@@ -177,34 +196,31 @@ def resoudre_entree(entree):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NOUVEAU — GÉORISQUES (risques complets par GPS / INSEE)
+# GÉORISQUES (API v1 BRGM — sans token)
 # ─────────────────────────────────────────────────────────────────────────────
 def collecter_georisques(lat, lon, code_insee=None):
     if not lat or not lon: return {}
     result = {}
+    latlon = f"{lon},{lat}"
 
-    # Argile (précision parcelle)
-    d = get(f"{GEORISQUES_BASE}/argiles", {"latlon": f"{lon},{lat}", "rayon": 100})
+    d = get(f"{GEORISQUES_BASE}/argiles", {"latlon": latlon, "rayon": 100})
     if d and d.get("data"):
         r = d["data"][0]
         result["argile_alea"] = r.get("lib_risque_jo", r.get("code_alea", "—"))
         result["argile_code"] = r.get("code_alea", "—")
 
-    # Sismique (précision commune)
-    d = get(f"{GEORISQUES_BASE}/zonage-sismique", {"latlon": f"{lon},{lat}", "rayon": 100})
+    d = get(f"{GEORISQUES_BASE}/zonage-sismique", {"latlon": latlon, "rayon": 100})
     if d and d.get("data"):
         r = d["data"][0]
         result["sismique_zone"] = r.get("zone", r.get("code_zone", "—"))
         result["sismique_lib"]  = r.get("lib_zone", "—")
 
-    # Radon (précision commune)
     if code_insee:
         d = get(f"{GEORISQUES_BASE}/radon", {"code_insee": code_insee})
         if d and d.get("data"):
             result["radon_classe"] = d["data"][0].get("classe_potentiel", "—")
 
-    # Inondation AZI
-    d = get(f"{GEORISQUES_BASE}/azi", {"latlon": f"{lon},{lat}", "rayon": 200})
+    d = get(f"{GEORISQUES_BASE}/azi", {"latlon": latlon, "rayon": 200})
     if d and d.get("data"):
         result["inondation_nb_zones"] = len(d["data"])
         result["inondation_detail"]   = ", ".join(r.get("lib_type_alea", r.get("typeAlea", "")) for r in d["data"][:3]) or "—"
@@ -212,26 +228,23 @@ def collecter_georisques(lat, lon, code_insee=None):
         result["inondation_nb_zones"] = 0
         result["inondation_detail"]   = "Aucune zone"
 
-    # Cavités souterraines
-    d = get(f"{GEORISQUES_BASE}/cavites", {"latlon": f"{lon},{lat}", "rayon": 500})
+    d = get(f"{GEORISQUES_BASE}/cavites", {"latlon": latlon, "rayon": 500})
     if d and d.get("data"):
         result["cavites_nb"]    = len(d["data"])
         result["cavites_types"] = ", ".join(set(r.get("typeCavite", "") for r in d["data"][:5])) or "—"
     else:
         result["cavites_nb"] = 0
 
-    # Catastrophes naturelles (commune)
     if code_insee:
         d = get(f"{GEORISQUES_BASE}/gaspar/catnat", {"code_insee_commune": code_insee, "page": 1, "page_size": 5})
         if d and d.get("data"):
-            result["catnat_nb"]      = d.get("total", len(d["data"]))
-            result["catnat_types"]   = ", ".join(set(r.get("libDomCatNat", "") for r in d["data"][:5])) or "—"
+            result["catnat_nb"]       = d.get("total", len(d["data"]))
+            result["catnat_types"]    = ", ".join(set(r.get("libDomCatNat", "") for r in d["data"][:5])) or "—"
             result["catnat_derniere"] = d["data"][0].get("datFin", d["data"][0].get("dateDeb", "—"))
         else:
             result["catnat_nb"] = 0
 
-    # ICPE dans 500m
-    d = get(f"{GEORISQUES_BASE}/installations-classees", {"latlon": f"{lon},{lat}", "rayon": 500})
+    d = get(f"{GEORISQUES_BASE}/installations-classees", {"latlon": latlon, "rayon": 500})
     if d and d.get("data"):
         result["icpe_rayon_500m"] = len(d["data"])
         result["icpe_noms"]       = ", ".join(r.get("raisonSociale", r.get("nomEtab", "")) for r in d["data"][:3]) or "—"
@@ -242,11 +255,66 @@ def collecter_georisques(lat, lon, code_insee=None):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NOUVEAU — FRANCE CHALEUR URBAINE
+# NOUVEAU v2.1 — API Carto GPU : zone PLU, prescriptions, servitudes
+# ─────────────────────────────────────────────────────────────────────────────
+def collecter_gpu(lat, lon):
+    """
+    API Carto GPU (IGN) — Géoportail de l'Urbanisme.
+    Paramètre geom = GeoJSON Point {"type":"Point","coordinates":[lon,lat]}
+    Couches : zone-urba, prescription-surf, assiette-sup-s
+    Sans clé API (accès libre).
+    """
+    if not lat or not lon: return {}
+    geom = json.dumps({"type": "Point", "coordinates": [lon, lat]})
+    result = {}
+
+    # Zone PLU
+    d = get(f"{GPU_BASE}/zone-urba", {"geom": geom})
+    if d and d.get("features"):
+        feats = d["features"]
+        result["plu_nb_zones"]    = len(feats)
+        result["plu_types"]       = ", ".join(set(f["properties"].get("typezone", "") for f in feats)) or "—"
+        result["plu_libelles"]    = ", ".join(set(f["properties"].get("libelle", "") for f in feats[:3])) or "—"
+        # Première zone : infos détaillées
+        p = feats[0]["properties"]
+        result["plu_typezone"]    = p.get("typezone", "—")
+        result["plu_libelle"]     = p.get("libelle", "—")
+        result["plu_destdomi"]    = p.get("destdomi", "—")   # destination dominante
+        result["plu_partition"]   = p.get("partition", "—")  # identifiant document d'urbanisme
+    else:
+        result["plu_nb_zones"] = 0
+
+    # Prescriptions surfaciques (contraintes particulières)
+    d = get(f"{GPU_BASE}/prescription-surf", {"geom": geom})
+    if d and d.get("features"):
+        feats = d["features"]
+        result["plu_prescriptions_nb"]     = len(feats)
+        result["plu_prescriptions"]        = ", ".join(set(
+            f["properties"].get("libelle", f["properties"].get("typepsc", "")) for f in feats[:5]
+        )) or "—"
+    else:
+        result["plu_prescriptions_nb"] = 0
+
+    # Assiettes de Servitudes d'Utilité Publique (SUP)
+    d = get(f"{GPU_BASE}/assiette-sup-s", {"geom": geom})
+    if d and d.get("features"):
+        feats = d["features"]
+        result["sup_nb"]      = len(feats)
+        result["sup_libelles"] = ", ".join(set(
+            f["properties"].get("libelle", f["properties"].get("nomservit", "")) for f in feats[:5]
+        )) or "—"
+    else:
+        result["sup_nb"] = 0
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FRANCE CHALEUR URBAINE
 # ─────────────────────────────────────────────────────────────────────────────
 def collecter_fcu(lat, lon):
     if not lat or not lon: return {}
-    d = get(f"{FCU_BASE}/eligibility", {"lat": lat, "lon": lon})
+    d = get(f"{FCU_BASE}/v1/eligibility", {"lat": lat, "lon": lon})
     if not d: return {}
     return {
         "fcu_eligible":   d.get("isEligible", d.get("eligible", False)),
@@ -259,53 +327,39 @@ def collecter_fcu(lat, lon):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NOUVEAU — SIRENE : occupants du bâtiment
+# SIRENE
 # ─────────────────────────────────────────────────────────────────────────────
 def collecter_sirene(lat, lon, rayon_m=80):
     if not lat or not lon: return []
     d = get(SIRENE_BASE, {"lat": lat, "long": lon, "radius": rayon_m / 1000, "per_page": 5})
     if not d or not d.get("results"): return []
-    result = []
-    for e in d["results"][:5]:
-        result.append({
-            "siret":       e.get("siret", "—"),
-            "nom":         e.get("nom_complet", e.get("nom_raison_sociale", "—")),
-            "naf_code":    e.get("activite_principale", "—"),
-            "naf_libelle": e.get("libelle_activite_principale", "—"),
-            "adresse":     e.get("adresse", "—"),
-            "effectif":    e.get("tranche_effectif_salarie", "—"),
-            "statut":      e.get("etat_administratif", "—"),
-        })
-    return result
+    return [{
+        "siret":       e.get("siret", "—"),
+        "nom":         e.get("nom_complet", e.get("nom_raison_sociale", "—")),
+        "naf_code":    e.get("activite_principale", "—"),
+        "naf_libelle": e.get("libelle_activite_principale", "—"),
+        "effectif":    e.get("tranche_effectif_salarie", "—"),
+        "statut":      e.get("etat_administratif", "—"),
+    } for e in d["results"][:5]]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NOUVEAU — ANNUAIRE ÉDUCATION NATIONALE
+# ANNUAIRE ÉDUCATION NATIONALE
 # ─────────────────────────────────────────────────────────────────────────────
 def collecter_education(lat, lon, rayon_m=300):
     if not lat or not lon: return []
     d = get(EDU_URL, {
         "where": f"within_distance(coordonnees_gps, geom'POINT({lon} {lat})', {rayon_m}m)",
         "limit": 5,
-        "select": "identifiant_de_l_etablissement,nom_etablissement,type_etablissement,adresse_1,code_postal,nom_commune,telephone,statut_public_prive,nombre_d_eleves"
+        "select": "identifiant_de_l_etablissement,nom_etablissement,type_etablissement,"
+                  "adresse_1,code_postal,nom_commune,telephone,statut_public_prive,nombre_d_eleves"
     })
     if not d or not d.get("results"): return []
     return d["results"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NOUVEAU — DVF : transactions foncières
-# ─────────────────────────────────────────────────────────────────────────────
-def collecter_dvf(lat, lon, rayon_m=150):
-    if not lat or not lon: return []
-    d = get(DVF_URL, {"lon": lon, "lat": lat, "dist": rayon_m, "limit": 5})
-    if d and d.get("features"):
-        return [f.get("properties", {}) for f in d["features"][:5]]
-    return []
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# NOUVEAU — BENCHMARK TERTIAIRE ADEME
+# BENCHMARK TERTIAIRE ADEME (URLs CORRIGÉES v2.1)
 # ─────────────────────────────────────────────────────────────────────────────
 def collecter_benchmark_tertiaire(code_commune, activite_hint=None):
     result = {"commune": None, "activite": None}
@@ -321,7 +375,7 @@ def collecter_benchmark_tertiaire(code_commune, activite_hint=None):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ADEME DPE OPEN DATA (inchangé)
+# ADEME DPE OPEN DATA
 # ─────────────────────────────────────────────────────────────────────────────
 def collecter_ademe_direct(rnb_id, adresse_label, cle_ban, type_cible, numero_dpe_connu=None):
     resultats, erreurs = [], set()
@@ -368,7 +422,7 @@ def collecter_ademe_direct(rnb_id, adresse_label, cle_ban, type_cible, numero_dp
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# OBSERVATOIRE DPE — XLS complet (5 feuilles / 475 variables)
+# OBSERVATOIRE DPE — XLS complet
 # ─────────────────────────────────────────────────────────────────────────────
 def telecharger_xlsx_observatoire(numero_dpe, dossier_sortie=None):
     if not numero_dpe or numero_dpe in ("—", "None", None): return None
@@ -380,8 +434,6 @@ def telecharger_xlsx_observatoire(numero_dpe, dossier_sortie=None):
 
     session = requests.Session()
     session.headers.update(HEADERS)
-    print(f"  Tentative téléchargement XLS Observatoire...")
-
     try:
         r = session.get(f"{OBS_BASE}/pub/dpe/{numero_dpe}", timeout=15, allow_redirects=True)
         if r.ok and len(r.content) > 1000:
@@ -409,7 +461,6 @@ def telecharger_xlsx_observatoire(numero_dpe, dossier_sortie=None):
 
     print(f"  ✗ Observatoire inaccessible (Cloudflare/VPN étranger)")
     print(f"  → Téléchargement manuel : {OBS_BASE}/pub/dpe/{numero_dpe}")
-    print(f"    Déposez {numero_dpe}.xlsx dans le dossier du script.")
     return None
 
 
@@ -419,7 +470,6 @@ def analyser_dpe_xlsx(chemin):
     if not chemin or not os.path.exists(chemin): return {}
     try: xl = pd.read_excel(chemin, sheet_name=None)
     except Exception: return {}
-
     res = {}
     for feuille in ["administratif", "logement", "logement_sortie"]:
         if feuille in xl:
@@ -427,19 +477,19 @@ def analyser_dpe_xlsx(chemin):
             d = {}
             for _, row in df.iterrows():
                 k, val = row.iloc[0], (row.iloc[1] if len(row) > 1 else None)
-                if pd.notna(k) and pd.notna(val):
+                import pandas as _pd
+                if _pd.notna(k) and _pd.notna(val):
                     try: d[str(k).strip()] = float(val) if str(val).replace(".", "").replace("-", "").isdigit() else str(val).strip()
                     except Exception: d[str(k).strip()] = str(val).strip()
             res[feuille] = d
-
     if "rapport" in xl:
+        import pandas as _pd2
         df = xl["rapport"].dropna(how="all")
-        import pandas as _pd
         rapport = {"descriptif_simplifie": [], "packs_travaux": [], "gestes_entretien": []}
         pack = None
         for _, row in df.iterrows():
-            k   = str(row.iloc[0]).strip() if _pd.notna(row.iloc[0]) else ""
-            val = str(row.iloc[1]).strip() if _pd.notna(row.iloc[1]) else ""
+            k   = str(row.iloc[0]).strip() if _pd2.notna(row.iloc[0]) else ""
+            val = str(row.iloc[1]).strip() if _pd2.notna(row.iloc[1]) else ""
             if "num_pack_travaux" in k:                            pack = {"numero": val, "travaux": []}; rapport["packs_travaux"].append(pack)
             elif "conso_5_usages_apres_travaux" in k and pack:    pack["conso_apres"] = val
             elif "cout_pack_travaux_min" in k and pack:           pack["cout_min"] = val
@@ -460,31 +510,23 @@ def afficher_dpe_complet(d):
     section("DPE COMPLET — OBSERVATOIRE ADEME (475 variables)")
     print(f"  DPE n°    : {admin.get('reference_interne_projet','—')}  |  Date : {admin.get('date_visite_diagnostiqueur','—')}")
     print(f"  Adresse   : {admin.get('ban_housenumber','')} {admin.get('ban_street','')} — {admin.get('ban_postcode','')} {admin.get('ban_city','')}")
-    print(f"  Moteur    : {admin.get('version_moteur_calcul','—')}")
-
-    section("CARACTÉRISTIQUES (XLS complet)")
-    print(f"  Période construction : {logem.get('periode_construction','—')}")
-    print(f"  Surface habitable    : {logem.get('surface_habitable_logement','—')} m²")
-    print(f"  Zone climatique      : {logem.get('zone_climatique','—')}  |  Inertie : {logem.get('classe_inertie','—')}")
-    print(f"  Méthode DPE          : {logem.get('methode_application_dpe_log','—')}")
-
+    print(f"  Moteur    : {admin.get('version_moteur_calcul','—')}  |  Zone climatique : {logem.get('zone_climatique','—')}")
+    print(f"  Surface   : {logem.get('surface_habitable_logement','—')} m²  |  Inertie : {logem.get('classe_inertie','—')}")
     etiq_e = sortie.get("classe_bilan_dpe","—")
     etiq_g = sortie.get("classe_emission_ges","—")
     conso  = sortie.get("conso_5_usages_m2") or sortie.get("ep_conso_5_usages_m2","—")
-    ges    = sortie.get("emission_ges_5_usages_m2","—")
     try: cout = f"{round(float(sortie.get('cout_5_usages',0))):,}".replace(",", " ") + " €/an"
     except Exception: cout = "—"
     section("RÉSULTATS 3CL")
-    print(f"  Étiquette Énergie : {etiq_e}  ({conso} kWh EP/m²/an)")
-    print(f"  Étiquette GES     : {etiq_g}  ({ges} kg CO₂/m²/an)")
+    print(f"  Étiquette Énergie : {etiq_e}  ({conso} kWh EP/m²/an)  GES : {etiq_g}")
     print(f"  Coût annuel       : {cout}  |  Type énergie : {sortie.get('type_energie','—')}")
-    print(f"  Confort été       : {sortie.get('indicateur_confort_ete','—')}  |  Ubat : {sortie.get('ubat','—')} W/m².K")
+    print(f"  Ubat              : {sortie.get('ubat','—')} W/m².K  |  Confort été : {sortie.get('indicateur_confort_ete','—')}")
 
     section("DÉPERDITIONS THERMIQUES")
     total = sortie.get("deperdition_enveloppe", 0)
     for label, key in [("Murs","deperdition_mur"),("Plancher haut","deperdition_plancher_haut"),
                         ("Plancher bas","deperdition_plancher_bas"),("Baies vitrées","deperdition_baie_vitree"),
-                        ("Ponts therm.","deperdition_pont_thermique"),("Renouvl. air","deperdition_renouvellement_air"),
+                        ("Ponts thermiques","deperdition_pont_thermique"),("Renouvl. air","deperdition_renouvellement_air"),
                         ("TOTAL","deperdition_enveloppe")]:
         val = sortie.get(key)
         if val is not None:
@@ -506,20 +548,15 @@ def afficher_dpe_complet(d):
 def telecharger_dossier_complet(numero_dpe, dossier_sortie=None):
     if not numero_dpe or numero_dpe in ("None", "—"): return {}
     if dossier_sortie is None: dossier_sortie = os.path.dirname(os.path.abspath(__file__))
-
     titre("RÉCUPÉRATION DPE COMPLET")
     chemin = telecharger_xlsx_observatoire(numero_dpe, dossier_sortie)
     if chemin:
         donnees = analyser_dpe_xlsx(chemin)
-        if donnees:
-            afficher_dpe_complet(donnees)
-            return donnees
+        if donnees: afficher_dpe_complet(donnees); return donnees
 
-    # Fallback API simplifiée
-    print(f"\n  Fallback → API simplifiée data.ademe.fr")
-    print(f"  {'─'*40}")
-    for nom, url in [("Logements post-2021", ADEME_LOG_EXIST),("Tertiaire post-2021", ADEME_TERT_NEW),
-                      ("Logements neufs", ADEME_LOG_NEUF),("Tertiaire avant", ADEME_TERT_OLD),("Logements avant", ADEME_LOG_OLD)]:
+    print(f"  Fallback → API simplifiée data.ademe.fr")
+    for nom, url in [("Logements post-2021", ADEME_LOG_EXIST), ("Tertiaire post-2021", ADEME_TERT_NEW),
+                      ("Logements neufs", ADEME_LOG_NEUF), ("Tertiaire avant", ADEME_TERT_OLD)]:
         for params in [{"qs": f'numero_dpe:"{numero_dpe}"'}, {"qs": f'Numero_DPE:"{numero_dpe}"'}, {"q": numero_dpe}]:
             try:
                 r = requests.get(url, params={**params, "size": 1}, headers=HEADERS, timeout=20)
@@ -533,15 +570,11 @@ def telecharger_dossier_complet(numero_dpe, dossier_sortie=None):
                                 val = result.get(k)
                                 if val not in (None, "", "None"): return str(val)
                             return "—"
-                        print(f"  Étiquette   : {c('classe_consommation_energie','Etiquette_DPE','classe_bilan_dpe')}")
-                        print(f"  GES         : {c('classe_estimation_ges','Etiquette_GES','classe_emission_ges')}")
-                        print(f"  Conso EP    : {c('consommation_energie','Conso_5_usages_ep_m2','conso_5_usages_ep_m2')} kWh/m²/an")
-                        chemin_json = os.path.join(dossier_sortie, f"DPE_{numero_dpe}.json")
-                        with open(chemin_json, "w", encoding="utf-8") as f:
-                            json.dump(result, f, indent=2, ensure_ascii=False)
+                        print(f"  Étiquette : {c('classe_consommation_energie','Etiquette_DPE','classe_bilan_dpe')}")
+                        print(f"  GES       : {c('classe_estimation_ges','Etiquette_GES','classe_emission_ges')}")
                         return result
             except Exception: continue
-    print(f"  ✗ DPE non trouvé. → {OBS_BASE}/pub/dpe/{numero_dpe}")
+    print(f"  ✗ → {OBS_BASE}/pub/dpe/{numero_dpe}")
     return {}
 
 
@@ -549,8 +582,8 @@ def telecharger_dossier_complet(numero_dpe, dossier_sortie=None):
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
-    titre("AKILA PROSPECT v2 — SCANNER FULL-STACK BÂTIMENT")
-    print(f"  Sources : RNB · BAN · BDNB · Géorisques · FCU · SIRENE · Éducation · DVF · ADEME")
+    titre("AKILA PROSPECT v2.1 — SCANNER FULL-STACK BÂTIMENT")
+    print(f"  Sources : RNB · BAN · BDNB (30 tables) · Géorisques · GPU PLU · FCU · SIRENE · Éducation · ADEME")
 
     choix = input("\n  Cible : [T]ertiaire ou [P]articulier ? [T/p] : ").strip().upper()
     type_cible = "P" if choix == "P" else "T"
@@ -561,54 +594,145 @@ def main():
     entree = input("  Identifiant RNB, clé BAN ou adresse : ").strip()
     if not entree: return
 
+    # ── ÉTAPE 1 : Résolution
     print(f"\n  [1/6] Résolution adresse (BAN + RNB)...")
     res = resoudre_entree(entree)
     bat_id = res.get("bat_id_bdnb")
     if not bat_id:
         print("\n  ✗ Bâtiment introuvable dans la BDNB.")
-        print("    Vérifiez l'adresse ou essayez avec la clé BAN directe.")
         return
 
     lat, lon = res.get("lat"), res.get("lon")
     code_insee = res.get("code_commune_insee")
 
+    # ── ÉTAPE 2 : BDNB — TOUTES les tables (30+)
     print(f"  [2/6] BDNB — extraction complète ({bat_id})...")
     p1 = {"batiment_groupe_id": f"eq.{bat_id}", "limit": 1}
     pm = {"batiment_groupe_id": f"eq.{bat_id}", "order": "millesime.desc", "limit": 4}
     first = lambda lst: lst[0] if lst else {}
 
-    d_base    = first(bdnb("batiment_groupe", {**p1, "select": "code_commune_insee,libelle_commune_insee,s_geom_groupe,code_iris"}))
-    d_usage   = first(bdnb("batiment_groupe_synthese_propriete_usage", {**p1, "select": "usage_principal_bdnb_open,categorie_usage_propriete"}))
-    d_ffo     = first(bdnb("batiment_groupe_ffo_bat", {**p1, "select": "annee_construction,mat_mur_txt,mat_toit_txt,nb_log,nb_niveau,usage_niveau_1_txt"}))
-    d_topo    = first(bdnb("batiment_groupe_bdtopo_bat", {**p1, "select": "hauteur_mean,altitude_sol_mean,l_usage_1,nb_etages"}))
-    d_prop    = first(bdnb("batiment_groupe_proprietaire", {**p1, "select": "bat_prop_denomination_proprietaire,bat_prop_type_proprietaire"}))
-    d_risque  = first(bdnb("batiment_groupe_risques", {**p1, "select": "alea_argile,alea_radon,alea_sismique"}))
-    d_reseau  = first(bdnb("batiment_groupe_indicateur_reseau_chaud_froid", {**p1, "select": "indicateur_distance_au_reseau,reseau_en_construction,identifiant_reseau"}))
-    d_sitadel = bdnb("sitadel", {**p1, "select": "date_autorisation,type_autorisation,libelle_destination_principale", "limit": 5}) or []
+    # Tables de base (inchangées)
+    d_base    = first(bdnb("batiment_groupe",
+                          {**p1, "select": "code_commune_insee,libelle_commune_insee,s_geom_groupe,code_iris,code_epci_insee,quartier_prioritaire,nom_qp"}))
+    d_usage   = first(bdnb("batiment_groupe_synthese_propriete_usage",
+                          {**p1, "select": "usage_principal_bdnb_open"}))
+    d_ffo     = first(bdnb("batiment_groupe_ffo_bat",
+                          {**p1, "select": "annee_construction,mat_mur_txt,mat_toit_txt,nb_log,nb_niveau,usage_niveau_1_txt"}))
+    d_topo    = first(bdnb("batiment_groupe_bdtopo_bat",
+                          {**p1, "select": "hauteur_mean,altitude_sol_mean,l_usage_1,l_usage_2,l_etat,max_hauteur"}))
+    # Propriétaire — table corrigée v2.1
+    d_prop    = first(bdnb("rel_batiment_groupe_proprietaire_siren_open",
+                          {**p1, "select": "bat_prop_denomination_proprietaire,siren,nb_locaux_open,is_bailleur", "limit": 1}))
+    d_risque  = first(bdnb("batiment_groupe_risques",
+                          {**p1, "select": "alea_argile,alea_radon,alea_sismique"}))
+    d_reseau  = first(bdnb("batiment_groupe_indicateur_reseau_chaud_froid",
+                          {**p1, "select": "indicateur_distance_au_reseau,reseau_en_construction,id_reseau"}))
 
+    # SITADEL — noms de champs CORRIGÉS v2.1
+    d_sitadel = bdnb("sitadel",
+                     {**p1, "select": "date_reelle_autorisation,nature_projet,destination_principale,"
+                                      "etat_avancement_projet,s_loc_creee,s_loc_demolie", "limit": 5}) or []
+
+    # DPE principal
     if type_cible == "T":
-        d_dpe = first(bdnb("batiment_groupe_dpe_tertiaire", {**p1, "select": "identifiant_dpe,classe_conso_energie_dpe_tertiaire,classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,emission_ges_dpe_tertiaire_m2,type_energie_chauffage,date_etablissement_dpe,surface_utile,shon"}))
+        d_dpe = first(bdnb("batiment_groupe_dpe_tertiaire",
+                           {**p1, "select": "identifiant_dpe,classe_conso_energie_dpe_tertiaire,"
+                                            "classe_emission_ges_dpe_tertiaire,conso_dpe_tertiaire_ep_m2,"
+                                            "emission_ges_dpe_tertiaire_m2,type_energie_chauffage,"
+                                            "date_etablissement_dpe,surface_utile,shon,"
+                                            "methode_application_dpe_tertiaire"}))
+        # DPE tertiaire complet — consos par vecteur (NOUVEAU v2.1)
+        d_dpe_complet = first(bdnb("rel_batiment_groupe_dpe_tertiaire_complet",
+                                   {**p1, "select": "identifiant_dpe,conso_electricite,conso_gaz,conso_fioul,"
+                                                    "conso_bois,conso_reseau_chaleur,conso_reseau_froid,"
+                                                    "conso_autre_fossile,conso_gpl_butane_propane,"
+                                                    "derniere_annee_consommation,type_energie_climatisation,"
+                                                    "type_energie_ecs,categorie_erp_dpe_tertiaire", "limit": 1}))
     else:
-        d_dpe = first(bdnb("batiment_groupe_dpe_representatif_logement", {**p1, "select": "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,conso_5_usages_ep_m2,emission_ges_5_usages_m2,type_energie_chauffage,date_etablissement_dpe,surface_habitable_immeuble"}))
+        d_dpe = first(bdnb("batiment_groupe_dpe_representatif_logement",
+                           {**p1, "select": "identifiant_dpe,classe_bilan_dpe,classe_emission_ges,"
+                                            "conso_5_usages_ep_m2,emission_ges_5_usages_m2,"
+                                            "type_energie_chauffage,date_etablissement_dpe,"
+                                            "surface_habitable_immeuble,classe_inertie"}))
+        # DPE logement complet — déperditions par poste (NOUVEAU v2.1)
+        d_dpe_complet = first(bdnb("rel_batiment_groupe_dpe_logement_complet",
+                                   {**p1, "select": "identifiant_dpe,deperdition_mur,deperdition_plancher_haut,"
+                                                    "deperdition_plancher_bas,deperdition_baie_vitree,"
+                                                    "deperdition_pont_thermique,deperdition_porte,"
+                                                    "type_ventilation,type_isolation_mur_exterieur,"
+                                                    "type_isolation_plancher_haut,type_generateur_chauffage,"
+                                                    "type_generateur_ecs,surface_mur_exterieur,"
+                                                    "pourcentage_surface_baie_vitree_exterieur", "limit": 1}))
 
     d_elec = bdnb("batiment_groupe_dle_elec_multimillesime", {**pm, "select": "millesime,conso_tot,nb_pdl_tot"})
     d_gaz  = bdnb("batiment_groupe_dle_gaz_multimillesime",  {**pm, "select": "millesime,conso_tot,nb_pdl_tot"})
+    d_reseaux = bdnb("batiment_groupe_dle_reseaux_multimillesime",
+                     {**pm, "select": "millesime,conso_tot,type_reseau,identifiant_reseau"})
+
+    # ── NOUVELLES TABLES BDNB v2.1 ───────────────────────────────────────────
+    # DVF intégré dans la BDNB (remplace apicarto inexistant)
+    d_dvf_stat  = first(bdnb("batiment_groupe_dvf_open_statistique",
+                             {**p1, "select": "nb_mutation,valeur_fonciere_median,valeur_fonciere_min,"
+                                              "valeur_fonciere_max,prix_m2_local_median,prix_m2_local_moyen,"
+                                              "nb_locaux_mutee,nb_appartement_mutee,nb_locaux_tertiaire_mutee"}))
+    d_dvf_repr  = first(bdnb("batiment_groupe_dvf_open_representatif",
+                             {**p1, "select": "date_mutation,valeur_fonciere,prix_m2_local,"
+                                              "surface_bati_mutee_tertiaire,surface_bati_mutee_residencielle_collective,"
+                                              "nb_locaux_mutee_mutation,nb_piece_principale"}))
+    # Urbanisme
+    d_urba      = first(bdnb("batiment_groupe_urbanisme",
+                             {**p1, "select": "monument_historique,denomination_monument_historique,"
+                                              "distance_monument_historique,zone_plu_bati_patrimonial,"
+                                              "contrainte_urbanisme_ac1,source_monument_historique"}))
+    # BPE — équipements publics proches
+    d_bpe       = first(bdnb("batiment_groupe_bpe",
+                             {**p1, "select": "l_type_equipement"}))
+    # Copropriétés
+    d_rnc       = first(bdnb("batiment_groupe_rnc",
+                             {**p1, "select": "nb_log,nb_lot_tot,nb_lot_tertiaire,numero_immat_principal,"
+                                              "l_nom_copro,periode_construction_max"}))
+    # Logements sociaux
+    d_rpls      = first(bdnb("batiment_groupe_rpls",
+                             {**p1, "select": "nb_log,dans_qpv,classe_ener_principale,classe_ges_principale,"
+                                              "accessible_pmr,type_construction"}))
+    # QPV
+    d_qpv       = first(bdnb("batiment_groupe_qpv",
+                             {**p1, "select": "quartier_prioritaire,nom_quartier"}))
+    # Très Haut Débit ARCEP
+    d_hthd      = first(bdnb("batiment_groupe_hthd",
+                             {**p1, "select": "nb_pdl,l_type_pdl,l_nom_pdl"}))
+    # Fiabilité géocodage
+    d_geospx    = first(bdnb("batiment_groupe_geospx",
+                             {**p1, "select": "croisement_geospx_reussi,fiabilite_adresse,fiabilite_emprise_sol,fiabilite_hauteur"}))
+    # Zones d'activité BD TOPO
+    d_zoac      = first(bdnb("batiment_groupe_bdtopo_zoac",
+                             {**p1, "select": "l_nature,l_nature_detaillee,l_toponyme"}))
+    # Équipements BD TOPO
+    d_equ       = first(bdnb("batiment_groupe_bdtopo_equ",
+                             {**p1, "select": "l_nature,l_nature_detaillee,l_toponyme"}))
+
     numero_dpe = v(d_dpe.get("identifiant_dpe"))
 
-    print(f"  [3/6] Géorisques + France Chaleur Urbaine...")
+    # ── ÉTAPE 3 : APIs externes
+    print(f"  [3/6] Géorisques + GPU PLU + France Chaleur Urbaine...")
     d_geo = collecter_georisques(lat, lon, code_insee)
+    d_gpu = collecter_gpu(lat, lon)
     d_fcu = collecter_fcu(lat, lon)
 
-    print(f"  [4/6] SIRENE + Annuaire Éducation + DVF...")
+    print(f"  [4/6] SIRENE + Annuaire Éducation...")
     d_sirene = collecter_sirene(lat, lon, rayon_m=80)
     d_edu    = collecter_education(lat, lon, rayon_m=300)
-    d_dvf    = collecter_dvf(lat, lon, rayon_m=150)
 
     print(f"  [5/6] Benchmark tertiaire ADEME + DPE open data...")
     d_bench = collecter_benchmark_tertiaire(code_insee or d_base.get("code_commune_insee"), hint)
-    donnees_ademe, erreurs_ademe = collecter_ademe_direct(res.get("rnb_id"), res.get("adresse_label"), res.get("cle_ban"), type_cible, numero_dpe if numero_dpe != "—" else None)
+    donnees_ademe, erreurs_ademe = collecter_ademe_direct(
+        res.get("rnb_id"), res.get("adresse_label"), res.get("cle_ban"),
+        type_cible, numero_dpe if numero_dpe != "—" else None
+    )
 
-    # ── AFFICHAGE ──────────────────────────────────────────────────────────────
+    # =========================================================================
+    # AFFICHAGE STRUCTURÉ
+    # =========================================================================
     adresse_affichee = res.get("adresse_label") or "Adresse non résolue"
     titre(f"CARTE D'IDENTITÉ : {adresse_affichee}")
 
@@ -617,6 +741,7 @@ def main():
     print(f"  ID BDNB (CSTB)           : {v(bat_id)}")
     print(f"  Clé BAN (Interop)        : {v(res.get('cle_ban'))}")
     print(f"  Code INSEE commune       : {v(code_insee)}")
+    print(f"  Code EPCI                : {v(d_base.get('code_epci_insee'))}")
     if res.get("rnb_id"): print(f"  Fiche RNB                : https://rnb.beta.gouv.fr/batiment/{res['rnb_id']}")
     print(f"  Fiche BDNB               : https://bdnb.io/batiment/{bat_id}")
 
@@ -624,27 +749,51 @@ def main():
     print(f"  Commune                  : {v(d_base.get('code_commune_insee'))} — {v(d_base.get('libelle_commune_insee'))}")
     print(f"  Code IRIS                : {v(d_base.get('code_iris'))}")
     print(f"  Coordonnées GPS          : {v(lat)}, {v(lon)}")
+    print(f"  Quartier Prioritaire     : {v(d_qpv.get('quartier_prioritaire') or d_base.get('quartier_prioritaire'))}  {v(d_qpv.get('nom_quartier') or d_base.get('nom_qp'))}")
+
+    section("FIABILITÉ GÉOCODAGE (BDNB geospx)")
+    print(f"  Croisement géospatial    : {v(d_geospx.get('croisement_geospx_reussi'))}")
+    print(f"  Fiabilité adresse        : {v(d_geospx.get('fiabilite_adresse'))}")
+    print(f"  Fiabilité emprise sol    : {v(d_geospx.get('fiabilite_emprise_sol'))}")
+    print(f"  Fiabilité hauteur        : {v(d_geospx.get('fiabilite_hauteur'))}")
 
     section("CARACTÉRISTIQUES PHYSIQUES")
     print(f"  Année de construction    : {v(d_ffo.get('annee_construction'))}")
-    try:
-        print(f"  Âge du bâtiment          : {2025 - int(d_ffo['annee_construction'])} ans")
+    try: print(f"  Âge du bâtiment          : {2025 - int(d_ffo['annee_construction'])} ans")
     except Exception: pass
     surf = d_base.get("s_geom_groupe")
     print(f"  Surface emprise au sol   : {v(round(float(surf)) if surf else None, 'm²')}")
-    print(f"  Hauteur moyenne          : {v(d_topo.get('hauteur_mean'), 'm')}")
-    print(f"  Nb niveaux               : {v(d_topo.get('nb_etages') or d_ffo.get('nb_niveau'))}")
+    print(f"  Hauteur moyenne          : {v(d_topo.get('hauteur_mean'), 'm')}  (max : {v(d_topo.get('max_hauteur'), 'm')})")
+    print(f"  Altitude sol             : {v(d_topo.get('altitude_sol_mean'), 'm')}")
+    print(f"  Nb niveaux               : {v(d_ffo.get('nb_niveau'))}")
     print(f"  Matériaux murs           : {v(d_ffo.get('mat_mur_txt'))}")
     print(f"  Matériaux toit           : {v(d_ffo.get('mat_toit_txt'))}")
-    print(f"  Usages BD TOPO           : {v(d_topo.get('l_usage_1'))}")
+    print(f"  Usages BD TOPO           : {v(d_topo.get('l_usage_1'))}  {v(d_topo.get('l_usage_2'))}")
+    print(f"  État BD TOPO             : {v(d_topo.get('l_etat'))}")
 
     section("USAGE & PROPRIÉTÉ")
     print(f"  Usage principal (BDNB)   : {v(d_usage.get('usage_principal_bdnb_open'))}")
-    print(f"  Catégorie usage/prop.    : {v(d_usage.get('categorie_usage_propriete'))}")
     print(f"  Usage foncier (FF)       : {v(d_ffo.get('usage_niveau_1_txt'))}")
-    prop = d_prop.get("bat_prop_denomination_proprietaire") or d_prop.get("l_denomination_proprietaire")
-    print(f"  Propriétaire             : {v(prop)}")
-    print(f"  Type propriétaire        : {v(d_prop.get('bat_prop_type_proprietaire'))}")
+    print(f"  Propriétaire (dénomination): {v(d_prop.get('bat_prop_denomination_proprietaire'))}")
+    print(f"  SIREN propriétaire       : {v(d_prop.get('siren'))}")
+    print(f"  Est bailleur             : {v(d_prop.get('is_bailleur'))}")
+    print(f"  Nb locaux propriétaire   : {v(d_prop.get('nb_locaux_open'))}")
+
+    # NOUVEAU v2.1 — Équipements et zones d'activité
+    if d_zoac.get("l_nature"):
+        section("ZONES D'ACTIVITÉ BD TOPO")
+        print(f"  Nature                   : {v(d_zoac.get('l_nature'))}")
+        print(f"  Nature détaillée         : {v(d_zoac.get('l_nature_detaillee'))}")
+        print(f"  Toponyme                 : {v(d_zoac.get('l_toponyme'))}")
+
+    if d_equ.get("l_nature"):
+        section("ÉQUIPEMENTS BD TOPO À PROXIMITÉ")
+        print(f"  Natures                  : {v(d_equ.get('l_nature'))}")
+        print(f"  Détails                  : {v(d_equ.get('l_nature_detaillee'))}")
+
+    if d_bpe.get("l_type_equipement"):
+        section("ÉQUIPEMENTS INSEE (BPE)")
+        print(f"  Types d'équipements      : {v(d_bpe.get('l_type_equipement'))}")
 
     section("PERFORMANCE ÉNERGÉTIQUE (BDNB)")
     print(f"  Numéro DPE               : {numero_dpe}")
@@ -654,13 +803,48 @@ def main():
         print(f"  Consommation EP          : {v(d_dpe.get('conso_dpe_tertiaire_ep_m2'), 'kWh/m²/an')}")
         print(f"  Émissions GES            : {v(d_dpe.get('emission_ges_dpe_tertiaire_m2'), 'kg CO2/m²/an')}")
         print(f"  Énergie chauffage        : {v(d_dpe.get('type_energie_chauffage'))}")
+        print(f"  Méthode DPE              : {v(d_dpe.get('methode_application_dpe_tertiaire'))}")
         print(f"  Surface utile / SHON     : {v(d_dpe.get('surface_utile'))} m² / {v(d_dpe.get('shon'))} m²")
+        print(f"  Catégorie ERP            : {v(d_dpe.get('categorie_erp_dpe_tertiaire') or d_dpe_complet.get('categorie_erp_dpe_tertiaire'))}")
+        # Consos détaillées par vecteur (NOUVEAU v2.1)
+        if d_dpe_complet:
+            section("CONSOS PAR VECTEUR ÉNERGÉTIQUE (DPE tertiaire complet)")
+            for label, key in [
+                ("Électricité", "conso_electricite"), ("Gaz naturel", "conso_gaz"),
+                ("Fioul", "conso_fioul"), ("Bois", "conso_bois"),
+                ("Réseau chaleur", "conso_reseau_chaleur"), ("Réseau froid", "conso_reseau_froid"),
+                ("GPL/Butane/Propane", "conso_gpl_butane_propane"), ("Autre fossile", "conso_autre_fossile"),
+            ]:
+                val = d_dpe_complet.get(key)
+                if val and str(val) not in ("0", "0.0", "None", "—"):
+                    print(f"  {label:<22} : {v(val)} kWh/an")
+            print(f"  Énergie climatisation    : {v(d_dpe_complet.get('type_energie_climatisation'))}")
+            print(f"  Énergie ECS              : {v(d_dpe_complet.get('type_energie_ecs'))}")
+            print(f"  Dernière année conso     : {v(d_dpe_complet.get('derniere_annee_consommation'))}")
     else:
         print(f"  Étiquette Énergie        : {v(d_dpe.get('classe_bilan_dpe'))}")
         print(f"  Étiquette GES            : {v(d_dpe.get('classe_emission_ges'))}")
         print(f"  Conso 5 usages EP        : {v(d_dpe.get('conso_5_usages_ep_m2'), 'kWh/m²/an')}")
         print(f"  Émissions GES            : {v(d_dpe.get('emission_ges_5_usages_m2'), 'kg CO2/m²/an')}")
         print(f"  Surface habitable        : {v(d_dpe.get('surface_habitable_immeuble'), 'm²')}")
+        print(f"  Classe inertie           : {v(d_dpe.get('classe_inertie'))}")
+        # Déperditions détaillées (NOUVEAU v2.1)
+        if d_dpe_complet and any(d_dpe_complet.get(k) for k in ["deperdition_mur","deperdition_baie_vitree"]):
+            section("DÉPERDITIONS THERMIQUES (DPE logement complet)")
+            for label, key in [
+                ("Murs","deperdition_mur"),("Plancher haut","deperdition_plancher_haut"),
+                ("Plancher bas","deperdition_plancher_bas"),("Baies vitrées","deperdition_baie_vitree"),
+                ("Ponts therm.","deperdition_pont_thermique"),("Portes","deperdition_porte"),
+            ]:
+                val = d_dpe_complet.get(key)
+                if val: print(f"  {label:<22} : {v(val)} W/K")
+            print(f"  Isolation murs           : {v(d_dpe_complet.get('type_isolation_mur_exterieur'))}")
+            print(f"  Isolation plancher haut  : {v(d_dpe_complet.get('type_isolation_plancher_haut'))}")
+            print(f"  Type ventilation         : {v(d_dpe_complet.get('type_ventilation'))}")
+            print(f"  Générateur chauffage     : {v(d_dpe_complet.get('type_generateur_chauffage'))}")
+            print(f"  Générateur ECS           : {v(d_dpe_complet.get('type_generateur_ecs'))}")
+            print(f"  Surface vitrée (%)       : {v(d_dpe_complet.get('pourcentage_surface_baie_vitree_exterieur'))} %")
+
     print(f"  Date DPE                 : {v(d_dpe.get('date_etablissement_dpe'))}")
     if numero_dpe != "—": print(f"  Observatoire             : {OBS_BASE}/pub/dpe/{numero_dpe}")
 
@@ -673,7 +857,7 @@ def main():
             vals.append(float(c) if c else 0)
             try: cout = f"[~{round(float(c)*0.15/1000):,} k€/an]".replace(",", " ")
             except Exception: cout = ""
-            print(f"    {e.get('millesime','—')}  →  {round(float(c)):,} kWh  ({v(e.get('nb_pdl_tot'))} PDL)  {cout}".replace(",", " "))
+            print(f"    {e.get('millesime','—')}  →  {kWh(c)}  ({v(e.get('nb_pdl_tot'))} PDL)  {cout}")
         if len(vals) >= 2:
             delta = (vals[0]-vals[-1])/vals[-1]*100 if vals[-1] else 0
             print(f"    Tendance : {'↓' if delta<0 else '↑'} {abs(round(delta,1))}%")
@@ -681,20 +865,94 @@ def main():
     print(f"  Gaz :")
     if d_gaz:
         for g in d_gaz:
-            c = g.get("conso_tot")
-            try: print(f"    {g.get('millesime','—')}  →  {round(float(c)):,} kWh".replace(",", " "))
+            try: print(f"    {g.get('millesime','—')}  →  {kWh(g.get('conso_tot'))}  ({v(g.get('nb_pdl_tot'))} PDL)")
             except Exception: print(f"    {g.get('millesime','—')}  →  —")
     else: print("    Non disponible.")
+    if d_reseaux:
+        print(f"  Réseau chaleur :")
+        for r in d_reseaux:
+            print(f"    {r.get('millesime','—')}  →  {kWh(r.get('conso_tot'))}  ({v(r.get('type_reseau'))})")
+
+    # DVF BDNB natif (CORRIGÉ v2.1 — remplace apicarto inexistant)
+    section("VALEURS FONCIÈRES DVF (BDNB natif)")
+    if d_dvf_stat.get("nb_mutation"):
+        print(f"  Nb mutations historiques : {v(d_dvf_stat.get('nb_mutation'))}")
+        print(f"  Valeur foncière médiane  : {eur(d_dvf_stat.get('valeur_fonciere_median'))}")
+        print(f"  Valeur foncière min/max  : {eur(d_dvf_stat.get('valeur_fonciere_min'))} / {eur(d_dvf_stat.get('valeur_fonciere_max'))}")
+        print(f"  Prix/m² médian           : {eur(d_dvf_stat.get('prix_m2_local_median'))}")
+        print(f"  Prix/m² moyen            : {eur(d_dvf_stat.get('prix_m2_local_moyen'))}")
+        print(f"  Locaux tertiaires mutés  : {v(d_dvf_stat.get('nb_locaux_tertiaire_mutee'))}")
+    else:
+        print("  Aucune transaction DVF enregistrée pour ce bâtiment.")
+    if d_dvf_repr.get("date_mutation"):
+        print(f"  Dernière transaction     : {v(d_dvf_repr.get('date_mutation'))} — {eur(d_dvf_repr.get('valeur_fonciere'))}")
+        print(f"  Prix/m² (dernière)       : {eur(d_dvf_repr.get('prix_m2_local'))}")
+
+    # SITADEL (champs CORRIGÉS v2.1)
+    if d_sitadel:
+        section(f"PERMIS DE CONSTRUIRE SITADEL ({len(d_sitadel)} enregistrement(s))")
+        for pc in d_sitadel:
+            print(f"  {v(pc.get('date_reelle_autorisation'))} — {v(pc.get('nature_projet'))} — {v(pc.get('destination_principale'))}")
+            if pc.get("etat_avancement_projet"):
+                print(f"    État : {pc.get('etat_avancement_projet')}  "
+                      f"Surface créée : {v(pc.get('s_loc_creee'))} m²  "
+                      f"Surface démolie : {v(pc.get('s_loc_demolie'))} m²")
+
+    # Copropriétés
+    if d_rnc.get("nb_lot_tot"):
+        section("REGISTRE NATIONAL DES COPROPRIÉTÉS (RNC)")
+        print(f"  N° immatriculation       : {v(d_rnc.get('numero_immat_principal'))}")
+        print(f"  Nom copropriété          : {v(d_rnc.get('l_nom_copro'))}")
+        print(f"  Nb lots total            : {v(d_rnc.get('nb_lot_tot'))}  (tertiaires : {v(d_rnc.get('nb_lot_tertiaire'))})")
+        print(f"  Nb logements             : {v(d_rnc.get('nb_log'))}")
+        print(f"  Période construction     : {v(d_rnc.get('periode_construction_max'))}")
+
+    # Logements sociaux
+    if d_rpls.get("nb_log"):
+        section("LOGEMENTS SOCIAUX (RPLS)")
+        print(f"  Nb logements sociaux     : {v(d_rpls.get('nb_log'))}")
+        print(f"  Dans QPV                 : {v(d_rpls.get('dans_qpv'))}")
+        print(f"  Étiquette énergie RPLS   : {v(d_rpls.get('classe_ener_principale'))}")
+        print(f"  GES RPLS                 : {v(d_rpls.get('classe_ges_principale'))}")
+        print(f"  Accessible PMR           : {v(d_rpls.get('accessible_pmr'))}")
+
+    # Très Haut Débit
+    if d_hthd.get("nb_pdl"):
+        section("TRÈS HAUT DÉBIT (ARCEP)")
+        print(f"  Nb points de livraison   : {v(d_hthd.get('nb_pdl'))}")
+        print(f"  Types PDL                : {v(d_hthd.get('l_type_pdl'))}")
+
+    # Urbanisme BDNB + GPU IGN
+    section("URBANISME (BDNB + API Carto GPU IGN)")
+    print(f"  Monument Historique      : {v(d_urba.get('monument_historique'))}")
+    if d_urba.get("monument_historique"):
+        print(f"  Dénomination MH          : {v(d_urba.get('denomination_monument_historique'))}")
+        print(f"  Distance MH              : {v(d_urba.get('distance_monument_historique'))} m")
+        print(f"  Source                   : {v(d_urba.get('source_monument_historique'))}")
+    print(f"  Bâti patrimonial PLU     : {v(d_urba.get('zone_plu_bati_patrimonial'))}")
+    print(f"  Contrainte urbanisme ac1 : {v(d_urba.get('contrainte_urbanisme_ac1'))}")
+    # GPU (API Carto IGN)
+    if d_gpu.get("plu_nb_zones", 0) > 0:
+        print(f"  ── GPU IGN (Géoportail Urbanisme) ──")
+        print(f"  Zone PLU                 : {v(d_gpu.get('plu_typezone'))} — {v(d_gpu.get('plu_libelle'))}")
+        print(f"  Destination dominante    : {v(d_gpu.get('plu_destdomi'))}")
+        print(f"  Prescriptions            : {v(d_gpu.get('plu_prescriptions_nb'))} — {v(d_gpu.get('plu_prescriptions'))}")
+        print(f"  Servitudes SUP           : {v(d_gpu.get('sup_nb'))} — {v(d_gpu.get('sup_libelles'))}")
+        print(f"  Partition document       : {v(d_gpu.get('plu_partition'))}")
+    else:
+        print(f"  GPU IGN                  : aucune donnée PLU (commune hors coverage ou RNU)")
 
     # Géorisques
-    section("RISQUES NATURELS & TECHNOLOGIQUES (API Géorisques BRGM)")
+    section("RISQUES NATURELS & TECHNOLOGIQUES (Géorisques BRGM)")
     print(f"  Argile / RGA             : {v(d_geo.get('argile_alea'))} (code : {v(d_geo.get('argile_code'))})")
     print(f"  Radon                    : Classe {v(d_geo.get('radon_classe'))}  |  BDNB : {v(d_risque.get('alea_radon'))}")
     print(f"  Sismique                 : Zone {v(d_geo.get('sismique_zone'))} — {v(d_geo.get('sismique_lib'))}")
     print(f"  Inondation               : {v(d_geo.get('inondation_nb_zones'))} zone(s) — {v(d_geo.get('inondation_detail'))}")
-    print(f"  Cavités souterraines     : {v(d_geo.get('cavites_nb'))} (rayon 500m)  {('types : ' + v(d_geo.get('cavites_types'))) if d_geo.get('cavites_nb',0)>0 else ''}")
+    print(f"  Cavités souterraines     : {v(d_geo.get('cavites_nb'))} (rayon 500m)")
+    if d_geo.get("cavites_nb", 0) > 0: print(f"    Types                : {v(d_geo.get('cavites_types'))}")
     print(f"  Catastrophes naturelles  : {v(d_geo.get('catnat_nb'))} événement(s) — {v(d_geo.get('catnat_types'))}")
-    print(f"  ICPE (rayon 500m)        : {v(d_geo.get('icpe_rayon_500m'))} installation(s)  {('→ ' + v(d_geo.get('icpe_noms'))) if d_geo.get('icpe_rayon_500m',0)>0 else ''}")
+    print(f"  ICPE (rayon 500m)        : {v(d_geo.get('icpe_rayon_500m'))} installation(s)")
+    if d_geo.get("icpe_rayon_500m", 0) > 0: print(f"    Sites                : {v(d_geo.get('icpe_noms'))}")
 
     # France Chaleur Urbaine
     section("RÉSEAU DE CHALEUR (France Chaleur Urbaine)")
@@ -706,10 +964,11 @@ def main():
     else:
         print(f"  BDNB distance réseau     : {v(d_reseau.get('indicateur_distance_au_reseau'))}")
         print(f"  Réseau en construction   : {v(d_reseau.get('reseau_en_construction'))}")
+        if d_reseau.get("id_reseau"): print(f"  ID réseau BDNB           : {v(d_reseau.get('id_reseau'))}")
 
     # Benchmark ADEME
     if d_bench.get("commune") or d_bench.get("activite"):
-        section("BENCHMARK TERTIAIRE (ADEME)")
+        section("BENCHMARK TERTIAIRE (ADEME — slugs corrigés v2.1)")
         if d_bench.get("commune"):
             cm = d_bench["commune"]
             print(f"  Commune {str(cm.get('libelle_commune','')):<22} : {v(cm.get('conso_m2_kwh'))} kWh/m²")
@@ -723,7 +982,7 @@ def main():
     if d_sirene:
         for e in d_sirene:
             print(f"  {e.get('nom','—')} | SIRET: {e.get('siret','—')} | NAF: {e.get('naf_libelle','—')} | Effectif: {e.get('effectif','—')}")
-    else: print("  Aucun établissement dans le rayon.")
+    else: print("  Aucun dans le rayon.")
 
     # Annuaire Éducation
     if d_edu:
@@ -731,18 +990,6 @@ def main():
         for e in d_edu:
             print(f"  {e.get('nom_etablissement','—')} ({e.get('type_etablissement','—')}) — UAI: {e.get('identifiant_de_l_etablissement','—')}")
             print(f"    {e.get('adresse_1','—')}, {e.get('code_postal','—')} {e.get('nom_commune','—')} | {e.get('statut_public_prive','—')} | {e.get('nombre_d_eleves','—')} élèves")
-
-    # DVF
-    if d_dvf:
-        section(f"TRANSACTIONS FONCIÈRES DVF À PROXIMITÉ ({len(d_dvf)} trouvée(s))")
-        for mut in d_dvf[:3]:
-            date  = mut.get("date_mutation", "—")
-            prix  = mut.get("valeur_fonciere", "—")
-            surf  = mut.get("surface_reelle_bati", "—")
-            type_ = mut.get("type_local", "—")
-            try: prix_fmt = f"{int(float(str(prix).replace(',','.'))):,}".replace(",", " ") + " €"
-            except Exception: prix_fmt = str(prix)
-            print(f"  {date} — {type_} — {surf} m² — {prix_fmt}")
 
     # DPE ADEME open data
     def champ(d, *cles):
@@ -753,22 +1000,31 @@ def main():
     if donnees_ademe:
         section(f"DPE ADEME OPEN DATA ({len(donnees_ademe)} résultat(s))")
         for d in donnees_ademe[:3]:
-            ndpe   = champ(d, "numero_dpe", "Numero_DPE")
-            etiq_e = champ(d, "classe_consommation_energie", "Etiquette_DPE")
-            etiq_g = champ(d, "classe_estimation_ges", "Etiquette_GES")
-            secteur = champ(d, "secteur_activite", "Secteur_activite_principale_batiment", "Type_batiment")
-            print(f"  N° DPE : {ndpe}  |  Énergie : {etiq_e}  GES : {etiq_g}  Secteur : {secteur}")
+            print(f"  N° DPE : {champ(d,'numero_dpe','Numero_DPE')}  |  "
+                  f"Énergie : {champ(d,'classe_consommation_energie','Etiquette_DPE')}  "
+                  f"GES : {champ(d,'classe_estimation_ges','Etiquette_GES')}  "
+                  f"Secteur : {champ(d,'secteur_activite','Secteur_activite_principale_batiment')}")
 
-    # SITADEL
-    if d_sitadel:
-        section(f"PERMIS DE CONSTRUIRE SITADEL ({len(d_sitadel)} enregistrement(s))")
-        for pc in d_sitadel:
-            print(f"  {pc.get('date_autorisation','—')} — {pc.get('type_autorisation','—')} — {pc.get('libelle_destination_principale','—')}")
+    # API Entreprise DINUM (stub — habilitation requise)
+    section("COUCHE FINANCIÈRE PROPRIÉTAIRE (API Entreprise DINUM)")
+    siren = d_prop.get("siren")
+    if siren:
+        print(f"  SIREN propriétaire       : {v(siren)}")
+        print(f"  ⚠️  API Entreprise requiert une habilitation administrative.")
+        print(f"  Données disponibles sur habilitation :")
+        print(f"    • Liasses fiscales DGFIP  : CA, bilans 3 dernières années")
+        print(f"    • Certification Qualibat  : prestataires travaux RGE sur site")
+        print(f"    • Attestation Urssaf      : vigilance sous-traitants")
+        print(f"    • Effectifs mensuel GIP MDS")
+        print(f"  → Demande habilitation : https://entreprise.api.gouv.fr/cas-usage/batiment")
+    else:
+        print("  SIREN non disponible pour ce bâtiment (données propriétaire limitées open data).")
 
     # Rayon X BDNB
     titre("RAYON X — DONNÉES BRUTES BDNB (tous champs non nuls)")
-    all_data = {**d_base, **d_usage, **d_ffo, **d_topo, **d_dpe, **d_risque, **d_reseau}
-    EXCLURE = {"geom_groupe", "geom_groupe_pos_wgs84", "geom_cstr", "geom_adresse"}
+    all_data = {**d_base, **d_usage, **d_ffo, **d_topo, **d_dpe, **d_risque, **d_reseau,
+                **d_urba, **d_geospx, **d_dvf_stat, **d_dvf_repr}
+    EXCLURE = {"geom_groupe", "geom_groupe_pos_wgs84", "geom_cstr", "geom_adresse", "geom_iris"}
     for key, value in sorted(all_data.items()):
         if key not in EXCLURE and value not in (None, "", "None", [], {}):
             print(f"  {key:<45} : {v(value)}")
@@ -784,12 +1040,24 @@ def main():
     chemin_json = os.path.join(dossier_script, f"akila_{slug}_{ts}.json")
     export = {
         "adresse": adresse_affichee, "resolution": res,
-        "bdnb": {"base": d_base, "usage": d_usage, "ffo": d_ffo, "topo": d_topo,
-                  "dpe": d_dpe, "risques": d_risque, "reseau": d_reseau,
-                  "elec": d_elec, "gaz": d_gaz, "sitadel": d_sitadel},
-        "georisques": d_geo, "france_chaleur": d_fcu,
-        "sirene": d_sirene, "education": d_edu, "dvf": d_dvf,
-        "benchmark_ademe": d_bench, "ademe_open": donnees_ademe,
+        "bdnb": {
+            "base": d_base, "usage": d_usage, "ffo": d_ffo, "topo": d_topo,
+            "proprietaire": d_prop, "dpe": d_dpe, "dpe_complet": d_dpe_complet,
+            "risques": d_risque, "reseau": d_reseau,
+            "elec": d_elec, "gaz": d_gaz, "reseaux_chaleur": d_reseaux,
+            "sitadel": d_sitadel,
+            "dvf_statistique": d_dvf_stat, "dvf_representatif": d_dvf_repr,
+            "urbanisme": d_urba, "bpe": d_bpe, "rnc": d_rnc, "rpls": d_rpls,
+            "qpv": d_qpv, "hthd": d_hthd, "geospx": d_geospx,
+            "zoac": d_zoac, "equ": d_equ,
+        },
+        "georisques": d_geo,
+        "gpu_urbanisme": d_gpu,
+        "france_chaleur": d_fcu,
+        "sirene": d_sirene,
+        "education": d_edu,
+        "benchmark_ademe": d_bench,
+        "ademe_open": donnees_ademe,
         "dpe_complet_xlsx": donnees_dpe_complet if isinstance(donnees_dpe_complet, dict) else {},
         "genere_le": datetime.now().isoformat()
     }
