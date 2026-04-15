@@ -1,0 +1,350 @@
+{
+  "adresse": "1 Rue de Rivoli 75004 Paris 4e Arrondissement",
+  "resolution": {
+    "entree_originale": "GS25-P9SX-1E44",
+    "type_entree": "rnb",
+    "rnb_id": "GS25P9SX1E44",
+    "cle_ban": "75104_8249_00001",
+    "adresse_label": "1 Rue de Rivoli 75004 Paris 4e Arrondissement",
+    "bdnb_bat_construction_id": "bdnb-bc-SK1D-P1HX-LWGQ",
+    "bat_id_bdnb": "bdnb-bg-SRJA-6FHZ-3HND",
+    "lat": 48.85553865877671,
+    "lon": 2.359176683876147,
+    "code_commune_insee": "75104"
+  },
+  "bdnb": {
+    "base": {
+      "code_commune_insee": "75104",
+      "libelle_commune_insee": "Paris 4e Arrondissement",
+      "s_geom_groupe": 349,
+      "code_iris": "751041401",
+      "code_epci_insee": "200054781",
+      "quartier_prioritaire": null,
+      "nom_qp": null
+    },
+    "usage": {
+      "usage_principal_bdnb_open": "Résidentiel collectif"
+    },
+    "ffo": {
+      "annee_construction": 1870,
+      "mat_mur_txt": "PIERRE",
+      "mat_toit_txt": "ZINC ALUMINIUM",
+      "nb_log": 13,
+      "nb_niveau": 7,
+      "usage_niveau_1_txt": "Résidentiel collectif"
+    },
+    "topo": {
+      "hauteur_mean": 19,
+      "altitude_sol_mean": 35,
+      "l_usage_1": [
+        "Résidentiel"
+      ],
+      "l_usage_2": [
+        "Commercial et services"
+      ],
+      "l_etat": [
+        "En service"
+      ],
+      "max_hauteur": 19
+    },
+    "proprietaire": {
+      "bat_prop_denomination_proprietaire": "CABINET DESLANDES",
+      "siren": "353337157",
+      "nb_locaux_open": 9,
+      "is_bailleur": false
+    },
+    "dpe": {
+      "identifiant_dpe": "1775V8000870B",
+      "classe_conso_energie_dpe_tertiaire": "G",
+      "classe_emission_ges_dpe_tertiaire": "C",
+      "conso_dpe_tertiaire_ep_m2": 682.68,
+      "emission_ges_dpe_tertiaire_m2": 22.23,
+      "type_energie_chauffage": "electricite",
+      "date_etablissement_dpe": null,
+      "surface_utile": null,
+      "shon": null,
+      "methode_application_dpe_tertiaire": "dpe tertiaire facture"
+    },
+    "dpe_complet": {
+      "identifiant_dpe": "1775V8000870B",
+      "conso_electricite": null,
+      "conso_gaz": null,
+      "conso_fioul": null,
+      "conso_bois": null,
+      "conso_reseau_chaleur": null,
+      "conso_reseau_froid": null,
+      "conso_autre_fossile": null,
+      "conso_gpl_butane_propane": null,
+      "derniere_annee_consommation": null,
+      "type_energie_climatisation": "electricite",
+      "type_energie_ecs": "electricite",
+      "categorie_erp_dpe_tertiaire": null
+    },
+    "risques": {
+      "alea_argile": null,
+      "alea_radon": "Faible",
+      "alea_sismique": "Très faible"
+    },
+    "reseau": {
+      "indicateur_distance_au_reseau": "inferieure à 100m",
+      "reseau_en_construction": false,
+      "id_reseau": "7501C"
+    },
+    "elec": [
+      {
+        "millesime": "2024",
+        "conso_tot": 130878.0,
+        "nb_pdl_tot": 13.0
+      },
+      {
+        "millesime": "2023",
+        "conso_tot": 143317.0,
+        "nb_pdl_tot": 15.0
+      },
+      {
+        "millesime": "2022",
+        "conso_tot": 22562.2,
+        "nb_pdl_tot": 14.0
+      },
+      {
+        "millesime": "2021",
+        "conso_tot": 141540.8,
+        "nb_pdl_tot": 13.0
+      }
+    ],
+    "gaz": [
+      {
+        "millesime": "2024",
+        "conso_tot": 113213.1,
+        "nb_pdl_tot": 11.0
+      },
+      {
+        "millesime": "2023",
+        "conso_tot": 131063.9,
+        "nb_pdl_tot": 12.0
+      },
+      {
+        "millesime": "2022",
+        "conso_tot": 130927.6,
+        "nb_pdl_tot": 12.0
+      },
+      {
+        "millesime": "2021",
+        "conso_tot": 141915.4,
+        "nb_pdl_tot": 11.0
+      }
+    ],
+    "reseaux_chaleur": [],
+    "sitadel": [],
+    "dvf_statistique": {
+      "nb_mutation": 2,
+      "valeur_fonciere_median": 1577500,
+      "valeur_fonciere_min": 1300000,
+      "valeur_fonciere_max": 1855000,
+      "prix_m2_local_median": 11380,
+      "prix_m2_local_moyen": 11380,
+      "nb_locaux_mutee": 5,
+      "nb_appartement_mutee": 1,
+      "nb_locaux_tertiaire_mutee": 2
+    },
+    "dvf_representatif": {
+      "date_mutation": "2024-12-02",
+      "valeur_fonciere": 1855000.0,
+      "prix_m2_local": 11380,
+      "surface_bati_mutee_tertiaire": null,
+      "surface_bati_mutee_residencielle_collective": 163,
+      "nb_locaux_mutee_mutation": 3,
+      "nb_piece_principale": 6
+    },
+    "urbanisme": {
+      "monument_historique": false,
+      "denomination_monument_historique": "HÃ´tel du PrÃ©sident HÃ©nault de Cantorbe",
+      "distance_monument_historique": 12,
+      "zone_plu_bati_patrimonial": false,
+      "contrainte_urbanisme_ac1": true,
+      "source_monument_historique": "merimee + geoportail_urbanisme"
+    },
+    "bpe": {
+      "l_type_equipement": [
+        "magasin d’optique"
+      ]
+    },
+    "rnc": {
+      "nb_log": 17.0,
+      "nb_lot_tot": 22.0,
+      "nb_lot_tertiaire": 5.0,
+      "numero_immat_principal": "AA2994614",
+      "l_nom_copro": [
+        "RIVOLI 1 RUE DE"
+      ],
+      "periode_construction_max": "AVANT_1949"
+    },
+    "rpls": {},
+    "qpv": {},
+    "hthd": {
+      "nb_pdl": 1.0,
+      "l_type_pdl": [
+        "IM"
+      ],
+      "l_nom_pdl": null
+    },
+    "geospx": {
+      "croisement_geospx_reussi": true,
+      "fiabilite_adresse": true,
+      "fiabilite_emprise_sol": "FAIBLE",
+      "fiabilite_hauteur": "BONNE"
+    },
+    "zoac": {},
+    "equ": {}
+  },
+  "georisques": {
+    "radon_classe": "1",
+    "inondation_nb_zones": 0,
+    "inondation_detail": "Aucune zone",
+    "cavites_nb": 0,
+    "catnat_nb": 0,
+    "icpe_rayon_500m": 0
+  },
+  "gpu_urbanisme": {
+    "plu_nb_zones": 1,
+    "plu_types": "U",
+    "plu_libelles": "US",
+    "plu_typezone": "U",
+    "plu_libelle": "US",
+    "plu_destdomi": null,
+    "plu_partition": "PSMV_75056_A",
+    "plu_prescriptions_nb": 2,
+    "plu_prescriptions": "Immeuble ou partie d'immeuble protégé au titre de son intérêt patrimonial de type B, Fuseau de protection du site de Paris",
+    "sup_nb": 2,
+    "sup_libelles": "—"
+  },
+  "france_chaleur": {
+    "fcu_eligible": true,
+    "fcu_distance_m": 41,
+    "fcu_reseau_nom": "—",
+    "fcu_reseau_id": "—",
+    "fcu_enr_pct": "—",
+    "fcu_co2": "—"
+  },
+  "sirene": [],
+  "education": [],
+  "benchmark_ademe": {
+    "commune": null,
+    "activite": null
+  },
+  "ademe_open": [],
+  "dpe_complet_xlsx": {
+    "est_efface": false,
+    "arrondissement": "00",
+    "surface_baies_orientees_nord": "\\N",
+    "nom_rue": "de Rivoli",
+    "version_methode_etude_thermique": "\\N",
+    "tv017_zone_hiver_code": "H1",
+    "tr002_type_batiment_est_efface": false,
+    "tv016_departement_nref": 5100,
+    "tr001_modele_dpe_type": "Vente",
+    "id": 4955238,
+    "usr_diagnostiqueur_id": 4305,
+    "surface_baies_orientees_est_ouest": "\\N",
+    "date_etablissement_dpe": "2017-07-05",
+    "dpe_vierge": "0",
+    "tv016_departement_c2": 340,
+    "geo_type": "housenumber",
+    "tv018_zone_ete_rclim_dernier_etage": 3,
+    "surface_planchers_hauts_deperditifs": "\\N",
+    "presence_verriere": "\\N",
+    "date_reception_dpe": "2017-07-05T17:32:37+02:00",
+    "tr001_modele_dpe_code": "V8",
+    "tv016_departement_fecs_recente_m_i": 63.9,
+    "tv016_departement_fecs_recente_i_c": 38,
+    "nombre_niveaux": "\\N",
+    "tv016_departement_departement": "75 - Paris",
+    "tv016_departement_e": 336.6,
+    "latitude": 48.855534,
+    "tv017_zone_hiver_t_ext_moyen": 6.58,
+    "tr002_type_batiment_description": "Bâtiments ou partie de bâtiment à usage principal autre que d'habitation",
+    "adresse_organisme_certificateur": "60 avenue du Général de Gaulle 92046 PARIS-LADEFENSE CEDEX",
+    "tv018_zone_ete_sclim_sup_150": 5,
+    "geo_id": "75104_8249_00001",
+    "tv017_zone_hiver_dh14": 42030,
+    "geo_adresse": "1 Rue de Rivoli 75004 Paris",
+    "tr002_type_batiment_code": "TR002_004",
+    "surface_utile": "\\N",
+    "tr001_modele_dpe_id": 8,
+    "tr012_categorie_erp_id": "\\N",
+    "tr001_modele_dpe_fichier_vierge": "8_V8_DPE_6.3c_bis.pdf",
+    "nombre_boutiques": "\\N",
+    "surface_habitable": "105.47",
+    "tv016_departement_id": 75,
+    "tv017_zone_hiver_peta_cw": 10.5,
+    "tv017_zone_hiver_prs1": 3.6,
+    "en_surface": "\\N",
+    "geo_l4": "1 RUE DE RIVOLI",
+    "tv016_departement_dhref": 55000,
+    "surface_thermique_parties_communes": "\\N",
+    "en_souterrain": "\\N",
+    "tv018_zone_ete_code": "Eb",
+    "_rand": 701561,
+    "tr002_type_batiment_ordre": 5,
+    "classe_estimation_ges": "C",
+    "nom_methode_dpe": "FACTURE - DPE",
+    "tr001_modele_dpe_modele": "6.3c bis",
+    "tr001_modele_dpe_type_ordre": 1,
+    "nom_methode_etude_thermique": "\\N",
+    "date_arrete_tarifs_energies": "2015-08-15",
+    "consommation_energie": 682.68,
+    "tv018_zone_ete_id": 2,
+    "portee_dpe_batiment": "\\N",
+    "classe_consommation_energie": "G",
+    "tv016_departement_fch": 24,
+    "numero_rue": "1",
+    "nombre_circulations_verticales": "\\N",
+    "tv017_zone_hiver_id": 1,
+    "type_voie": "rue",
+    "tv016_departement_t_ext_basse": -5,
+    "tv018_zone_ete_rclim_autres_etages": 2,
+    "nombre_entrees_sans_sas": "\\N",
+    "surface_planchers_bas_deperditifs": "\\N",
+    "tv016_departement_code": "75",
+    "tr013_type_erp_id": "\\N",
+    "longitude": 2.359276,
+    "annee_construction": 1948,
+    "_geopoint": "48.855534,2.359276",
+    "date_visite_diagnostiqueur": "2017-07-05",
+    "tv016_departement_pref": 66,
+    "surface_baies_orientees_sud": "\\N",
+    "tr001_modele_dpe_type_id": 1,
+    "tr001_modele_dpe_est_efface": false,
+    "code_insee_commune": "75104",
+    "tv016_departement_fecs_ancienne_i_c": 26,
+    "tr001_modele_dpe_description": "Pour  les  autres  bâtiments  non  mentionnés  dans  les  deux  précédents  cas : Consommation par Energie",
+    "tr002_type_batiment_simulateur": false,
+    "tv016_departement_fecs_ancienne_m_i": 49.5,
+    "usr_logiciel_id": 10,
+    "shon": "\\N",
+    "tr001_modele_dpe_type_libelle": "Vente",
+    "commune": "PARIS",
+    "tr002_type_batiment_id": 4,
+    "estimation_ges": 22.23,
+    "surface_verriere": "\\N",
+    "tv018_zone_ete_sclim_inf_150": 3,
+    "organisme_certificateur": "BUREAU VERITAS CERTIFICATION",
+    "nombre_entrees_avec_sas": "\\N",
+    "code_postal": "75004",
+    "tr002_type_batiment_libelle": "Non résidentiel",
+    "surface_thermique_lot": "105.47",
+    "tv016_departement_altmax": 400,
+    "numero_dpe": "1775V8000870B",
+    "_i": 239344,
+    "tv016_departement_fecs_solaire_m_i": 87,
+    "code_insee_commune_actualise": "75104",
+    "geo_score": 0.97,
+    "version_methode_dpe": "V2012",
+    "tv016_departement_altmin": 0,
+    "etat_avancement": true,
+    "surface_parois_verticales_opaques_deperditives": "\\N",
+    "_score": null,
+    "_id": "dxsWeX_vfBK66YKZuSwVU"
+  },
+  "genere_le": "2026-04-15T15:23:28.837521"
+}
