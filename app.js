@@ -362,7 +362,7 @@ async function resoudreEntree(entree) {
         }
     } else if (type === "ban") {
         res.cle_ban = entree;
-        let data = await fetchJSON(`${API.RNB_BASE}/address/`, { cle_interop: entree, limit: 1 });
+        let data = await fetchJSON(`${API.RNB_BASE}/address/`, { cle_interop_ban: entree, limit: 1 });
         if (data?.results?.length) {
             res.rnb_id = data.results[0].rnb_id;
             extraireRNB(data.results[0]);
@@ -385,7 +385,7 @@ async function resoudreEntree(entree) {
             const coords = ban.features[0].geometry.coordinates;
             res.lat = coords[1]; res.lon = coords[0];
             res.cle_ban = p?.id; res.adresse_label = p?.label;
-            const rnbData = await fetchJSON(`${API.RNB_BASE}/address/`, { cle_interop: res.cle_ban, limit: 1, min_score: 0.5 });
+            const rnbData = await fetchJSON(`${API.RNB_BASE}/address/`, { cle_interop_ban: res.cle_ban, limit: 1 });
             if (rnbData?.results?.length) {
                 res.rnb_id = rnbData.results[0].rnb_id;
                 extraireRNB(rnbData.results[0]);
@@ -499,46 +499,82 @@ function champ(d, ...keys) {
 async function collecterGeoriques(lat, lon, codeInsee) {
     if (!lat || !lon) return {};
     const geo = {};
-    const r = await fetchJSON(`https://georisques.gouv.fr/api/v1/gas/radon`, { lng: lon, lat: lat, rayon: 100 });
-    if (r && r.data && r.data.length) geo.radon_classe = r.data[0].classe_potentiel;
-    
+    const latlon = `${lon},${lat}`;
+
+    // Argiles
+    const arg = await fetchJSON(`https://georisques.gouv.fr/api/v1/argiles`, { latlon, rayon: 100 });
+    if (arg?.data?.length) {
+        geo.argile_alea = arg.data[0].lib_risque_jo || arg.data[0].code_alea || '—';
+        geo.argile_code = arg.data[0].code_alea || '—';
+    }
+
+    // Sismique
+    const sis = await fetchJSON(`https://georisques.gouv.fr/api/v1/zonage-sismique`, { latlon, rayon: 100 });
+    if (sis?.data?.length) {
+        geo.sismique_zone = sis.data[0].zone || sis.data[0].code_zone || '—';
+        geo.sismique_lib  = sis.data[0].lib_zone || '—';
+    }
+
+    // Radon (par code INSEE)
     if (codeInsee) {
-        const s = await fetchJSON(`https://georisques.gouv.fr/api/v1/zonage_sismique`, { code_insee: codeInsee });
-        if (s && s.data && s.data.length) {
-            geo.sismique_zone = s.data[0].zone_sismicite;
-            geo.sismique_lib = s.data[0].zone_sismicite_libelle;
+        const rad = await fetchJSON(`https://georisques.gouv.fr/api/v1/radon`, { code_insee: codeInsee });
+        if (rad?.data?.length) geo.radon_classe = rad.data[0].classe_potentiel || '—';
+    }
+
+    // Inondation
+    const azi = await fetchJSON(`https://georisques.gouv.fr/api/v1/azi`, { latlon, rayon: 200 });
+    if (azi?.data?.length) {
+        geo.inondation_nb_zones = azi.data.length;
+        geo.inondation_detail = [...new Set(azi.data.map(r => r.lib_type_alea || r.typeAlea || '').filter(Boolean))].slice(0, 3).join(', ') || '—';
+    } else {
+        geo.inondation_nb_zones = 0;
+        geo.inondation_detail = 'Aucune zone';
+    }
+
+    // Cavités
+    const cav = await fetchJSON(`https://georisques.gouv.fr/api/v1/cavites`, { latlon, rayon: 500 });
+    if (cav?.data?.length) {
+        geo.cavites_nb    = cav.data.length;
+        geo.cavites_types = [...new Set(cav.data.map(r => r.typeCavite || '').filter(Boolean))].slice(0, 5).join(', ') || '—';
+    } else {
+        geo.cavites_nb = 0;
+    }
+
+    // CatNat
+    if (codeInsee) {
+        const cat = await fetchJSON(`https://georisques.gouv.fr/api/v1/gaspar/catnat`, { code_insee_commune: codeInsee, page: 1, page_size: 5 });
+        if (cat?.data?.length) {
+            geo.catnat_nb       = cat.total || cat.data.length;
+            geo.catnat_types    = [...new Set(cat.data.map(r => r.libDomCatNat || '').filter(Boolean))].slice(0, 5).join(', ') || '—';
+            geo.catnat_derniere = cat.data[0].datFin || cat.data[0].dateDeb || '—';
+        } else {
+            geo.catnat_nb = 0;
         }
     }
-    
-    function parseGeo(url, propCount, propTypes) {
-        return fetchJSON(url, { lng: lon, lat: lat, rayon: 500 }).then(d => {
-            if (d && d.data) {
-                geo[propCount] = d.data.length;
-                if (propTypes) geo[propTypes] = Array.from(new Set(d.data.map(x => x.libelle || x.nom || x.activite_secondaire || '').filter(Boolean))).slice(0,3).join(', ');
-            }
-        }).catch(()=>{});
+
+    // ICPE
+    const icpe = await fetchJSON(`https://georisques.gouv.fr/api/v1/installations-classees`, { latlon, rayon: 500 });
+    if (icpe?.data?.length) {
+        geo.icpe_rayon_500m = icpe.data.length;
+        geo.icpe_noms = icpe.data.slice(0, 3).map(r => r.raisonSociale || r.nomEtab || '').filter(Boolean).join(', ') || '—';
+    } else {
+        geo.icpe_rayon_500m = 0;
     }
-    
-    await Promise.all([
-        parseGeo(`https://georisques.gouv.fr/api/v1/gas/inondation`, 'inondation_nb_zones', 'inondation_detail'),
-        parseGeo(`https://georisques.gouv.fr/api/v1/gas/cavites`, 'cavites_nb', 'cavites_types'),
-        parseGeo(`https://georisques.gouv.fr/api/v1/gas/catnat`, 'catnat_nb', 'catnat_types'),
-        parseGeo(`https://georisques.gouv.fr/api/v1/gas/installations_classees`, 'icpe_rayon_500m', 'icpe_noms')
-    ]);
+
     return geo;
 }
 
 async function collecterFCU(lat, lon) {
     if (!lat || !lon) return null;
-    const r = await fetchJSON(`https://france-chaleur-urbaine.beta.gouv.fr/api/network-distance`, { lat, lon });
+    const r = await fetchJSON(`https://france-chaleur-urbaine.beta.gouv.fr/api/v1/eligibility`, { lat, lon });
     if (r) {
         return {
-            fcu_eligible: r.isEligible || r.eligible || false,
-            fcu_distance_m: r.distance || 0,
-            fcu_reseau_nom: r.networkName || '—',
-            fcu_reseau_id: r.networkId || '—',
-            fcu_enr_pct: r.tauxENRR || '—',
-            fcu_co2: r.emissionCO2 || '—'
+            fcu_eligible:   r.isEligible ?? r.eligible ?? false,
+            fcu_distance_m: r.distance ?? r.distanceToNetwork ?? '—',
+            fcu_reseau_nom: r.networkName ?? r.nom ?? '—',
+            fcu_reseau_id:  r.networkId ?? r.identifiant_reseau ?? '—',
+            fcu_enr_pct:    r.tauxENRR ?? '—',
+            fcu_co2:        r.emissionCO2 ?? '—',
         };
     }
     return null;
@@ -547,15 +583,15 @@ async function collecterFCU(lat, lon) {
 async function collecterSIRENE(lat, lon) {
     if (!lat || !lon) return [];
     try {
-        const r = await fetchJSON(`https://recherche-entreprises.api.gouv.fr/near`, { lat, lon, radius: 0.08, per_page: 10 });
-        if (r && r.results) {
+        const r = await fetchJSON(`https://recherche-entreprises.api.gouv.fr/search`, { lat, long: lon, radius: 0.08, per_page: 5 });
+        if (r?.results) {
             return r.results.map(e => ({
-                siret: e.siret || '—',
-                nom: e.nom_complet || e.nom_raison_sociale || '—',
-                naf_code: e.activite_principale || '—',
+                siret:       e.siret || '—',
+                nom:         e.nom_complet || e.nom_raison_sociale || '—',
+                naf_code:    e.activite_principale || '—',
                 naf_libelle: e.libelle_activite_principale || '—',
-                effectif: e.tranche_effectif_salarie || '—',
-                statut: e.etat_administratif || '—'
+                effectif:    e.tranche_effectif_salarie || '—',
+                statut:      e.etat_administratif || '—'
             }));
         }
     } catch(e) {}

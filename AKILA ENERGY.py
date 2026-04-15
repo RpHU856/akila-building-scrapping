@@ -156,7 +156,7 @@ def resoudre_entree(entree):
             extraire_rnb(data)
     elif type_entree == "ban":
         res["cle_ban"] = entree
-        data = get(f"{RNB_BASE}/address/", {"cle_interop": entree, "limit": 1})
+        data = get(f"{RNB_BASE}/address/", {"cle_interop_ban": entree, "limit": 1})
         if data and data.get("results"):
             res["rnb_id"] = data["results"][0].get("rnb_id")
             extraire_rnb(data["results"][0])
@@ -175,7 +175,7 @@ def resoudre_entree(entree):
             res["lat"], res["lon"] = coords[1], coords[0]
             res["cle_ban"], res["adresse_label"] = p.get("id"), p.get("label")
             res["code_commune_insee"] = p.get("citycode")
-            rnb_data = get(f"{RNB_BASE}/address/", {"cle_interop": res["cle_ban"], "limit": 1, "min_score": 0.5})
+            rnb_data = get(f"{RNB_BASE}/address/", {"cle_interop_ban": res["cle_ban"], "limit": 1})
             if rnb_data and rnb_data.get("results"):
                 res["rnb_id"] = rnb_data["results"][0].get("rnb_id")
                 extraire_rnb(rnb_data["results"][0])
